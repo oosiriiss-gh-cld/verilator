@@ -1201,7 +1201,7 @@ public:
     string origParamName() const;
     void origParamName(const string& name);
     uint32_t toUInt() const { return num().toUInt(); }
-    int32_t toSInt() const VL_MT_SAFE { return num().toSInt(); }
+    int32_t toSInt() const VL_MT_SAFE { return num().toSInt(isSigned()); }
     uint64_t toUQuad() const { return num().toUQuad(); }
     string emitVerilog() override { V3ERROR_NA_RETURN(""); }
     string emitC() override { V3ERROR_NA_RETURN(""); }
