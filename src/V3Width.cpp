@@ -1157,8 +1157,10 @@ class WidthVisitor final : public VNVisitor {
                 // nodep->v3fatalSrc("Should have been declRanged in V3WidthSel");
             }
             const int selwidth = V3Number::log2b(frommsb + 1 - 1) + 1;  // Width to address a bit
+            // Always unsigned: this only addresses a bit position within fromp(),
+            // it is never negative, regardless of the signedness of lsbp() itself.
             AstNodeDType* const selwidthDTypep
-                = nodep->findLogicDType(selwidth, selwidth, nodep->lsbp()->dtypep()->numeric());
+                = nodep->findLogicDType(selwidth, selwidth, VSigning::UNSIGNED);
             userIterateAndNext(nodep->fromp(), WidthVP{SELF, FINAL}.p());
             userIterateAndNext(nodep->lsbp(), WidthVP{SELF, FINAL}.p());
             if (widthBad(nodep->lsbp(), selwidthDTypep) && nodep->lsbp()->width() != 32) {
@@ -1256,8 +1258,10 @@ class WidthVisitor final : public VNVisitor {
                 frommsb = fromlsb = 0;
             }
             const int selwidth = V3Number::log2b(frommsb + 1 - 1) + 1;  // Width to address a bit
+            // Always unsigned: this only addresses an element position within fromp(),
+            // it is never negative, regardless of the signedness of bitp() itself.
             AstNodeDType* const selwidthDTypep
-                = nodep->findLogicDType(selwidth, selwidth, nodep->bitp()->dtypep()->numeric());
+                = nodep->findLogicDType(selwidth, selwidth, VSigning::UNSIGNED);
             if (widthBad(nodep->bitp(), selwidthDTypep) && nodep->bitp()->width() != 32) {
                 nodep->v3widthWarn(selwidth, nodep->bitp()->width(),
                                    "Bit extraction of array["
