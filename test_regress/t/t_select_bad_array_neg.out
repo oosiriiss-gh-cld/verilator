@@ -1,0 +1,7 @@
+%Warning-SELRANGE: t/t_select_bad_array_neg.v:14:8: Selection index out of range: -5 outside 9:0
+                                                  : ... note: In instance 't'
+   14 |     arr[-5] = 8'h00;   
+      |        ^
+                   ... For warning description see https://verilator.org/warn/SELRANGE?v=latest
+                   ... Use "/* verilator lint_off SELRANGE */" and lint_on around source to disable this message.
+%Error: Exiting due to

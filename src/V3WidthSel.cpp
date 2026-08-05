@@ -229,6 +229,7 @@ class WidthSelVisitor final : public VNVisitor {
         UINFO(6, "SELBIT " << nodep);
         UINFOTREE(9, nodep->backp(), "", "SELBT0");
         // lhsp/rhsp do not need to be constant
+        V3Const::constifyEdit(nodep->bitp());  // May relink pointed to node, ok if not const
         AstNodeExpr* const fromp = nodep->fromp()->unlinkFrBack();
         AstNodeExpr* const rhsp = nodep->bitp()->unlinkFrBack();  // bit we're extracting
         UINFOTREE(9, nodep, "", "SELBT2");
