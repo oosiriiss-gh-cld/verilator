@@ -8732,13 +8732,18 @@ class WidthVisitor final : public VNVisitor {
         const int expWidth = expDTypep->width();
         if (constp && !constp->num().isNegative()) {
             // Save later constant propagation work, just right-size it.
+            // Build the replacement directly at its final (unsigned) dtype;
+            // don't let the common dtypep() assignment below re-sign it, as
+            // expDTypep may be signed even though the value is non-negative
+            // (e.g. a signed literal used as an array index).
             V3Number num{nodep, expWidth, constp->num()};
             num.isSigned(false);
             AstNodeExpr* const newp = new AstConst{nodep->fileline(), num};
             constp->replaceWith(newp);
             VL_DO_DANGLING(pushDeletep(constp), constp);
             VL_DANGLING(nodep);
-            nodep = newp;
+            UINFO(4, "             _new: " << newp);
+            return;
         } else if (expWidth < nodep->width()) {
             // Trunc - Extract
             VNRelinker linker;
