@@ -294,7 +294,8 @@ class ExpandVisitor final : public VNVisitor {
         // holding a negative lsb still yields the correct bit-within-word.
         FileLine* const fl = lsbp->fileline();
         if (VN_IS(lsbp, Const)) {
-            return new AstConst{fl, VL_BITBIT_E(VN_AS(lsbp, Const)->toSInt())};
+            return new AstConst{
+                fl, static_cast<uint32_t>(VL_BITBIT_E(VN_AS(lsbp, Const)->toSInt()))};
         } else {
             return new AstAnd{fl, new AstConst{fl, VL_EDATASIZE - 1}, lsbp->cloneTreePure(true)};
         }
