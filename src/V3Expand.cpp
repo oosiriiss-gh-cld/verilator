@@ -226,7 +226,14 @@ class ExpandVisitor final : public VNVisitor {
         // This is indexing a WordSel, so a 32 bit constants are fine
         FileLine* const flp = lsbp->fileline();
         if (const AstConst* constp = VN_CAST(lsbp, Const)) {
-            return new AstConst{flp, wordOffset + VL_BITWORD_E(constp->toUInt())};
+            // toSInt() (not toUInt()) sign extends, so a negative lsb floor-divides
+            // to a negative word index via VL_BITWORD_E's arithmetic shift, which
+            // wraps to a huge word number below and is caught as out-of-range by
+            // newWordSelWord(). toUInt() would instead zero extend a narrow negative
+            // Const into a small, wrong, in-range-looking word index.
+            const int32_t wordIdx
+                = static_cast<int32_t>(wordOffset) + VL_BITWORD_E(constp->toSInt());
+            return new AstConst{flp, static_cast<uint32_t>(wordIdx)};
         }
 
         if (lsbp->backp()) lsbp = lsbp->cloneTreePure(false);
@@ -250,7 +257,7 @@ class ExpandVisitor final : public VNVisitor {
         // Squash before C++ to avoid getting a C++ compiler warning
         // (even though code would be unreachable as presumably a
         // AstCond is protecting above this node.
-        if (wordOffset >= static_cast<uint32_t>(fromp->widthWords())) {
+        if (!indexp && wordOffset >= static_cast<uint32_t>(fromp->widthWords())) {
             return new AstConst{flp, AstConst::SizedEData{}, 0};
         }
 
@@ -259,10 +266,17 @@ class ExpandVisitor final : public VNVisitor {
         // If indexp was constant, just use it
         if (!indexp) return new AstWordSel{flp, fromp, new AstConst{flp, wordOffset}};
 
-        // Otherwise compute at runtime
+        // Otherwise compute at runtime. A negative (before the start of 'fromp')
+        // or too-large lsb makes 'indexp' an out-of-range word number; AstWordSel
+        // emits a raw, unguarded C++ array index, so guard it here or an
+        // out-of-range lsb would read/write outside the underlying array.
         if (indexp->backp()) indexp = indexp->cloneTreePure(false);
         if (wordOffset) indexp = new AstAdd{flp, new AstConst{flp, wordOffset}, indexp};
-        return new AstWordSel{flp, fromp, indexp};
+        AstNodeExpr* const oobp
+            = new AstGte{flp, indexp->cloneTreePure(false),
+                        new AstConst{flp, static_cast<uint32_t>(fromp->widthWords())}};
+        AstNodeExpr* const zerop = new AstConst{flp, AstConst::SizedEData{}, 0};
+        return new AstCond{flp, oobp, zerop, new AstWordSel{flp, fromp, indexp}};
     }
 
     // Return word of fromp that contains bit lsbp + the given word offset.
@@ -276,9 +290,11 @@ class ExpandVisitor final : public VNVisitor {
 
     static AstNodeExpr* newSelBitBit(AstNodeExpr* lsbp) {
         // Return equation to get the VL_BITBIT of a constant or non-constant
+        // toSInt() sign extends first, so a Const narrower than VL_EDATASIZE bits
+        // holding a negative lsb still yields the correct bit-within-word.
         FileLine* const fl = lsbp->fileline();
         if (VN_IS(lsbp, Const)) {
-            return new AstConst{fl, VL_BITBIT_E(VN_AS(lsbp, Const)->toUInt())};
+            return new AstConst{fl, VL_BITBIT_E(VN_AS(lsbp, Const)->toSInt())};
         } else {
             return new AstAnd{fl, new AstConst{fl, VL_EDATASIZE - 1}, lsbp->cloneTreePure(true)};
         }
