@@ -1275,6 +1275,8 @@ class WidthVisitor final : public VNVisitor {
             if (!m_doGenerate) {
                 // Must check bounds before adding a select that truncates the bound
                 // Note we've already subtracted off LSB
+                // Fold e.g. AstNegate{Const} into Const so the OOB check below can see it
+                V3Const::constifyEdit(nodep->bitp());  // May relink pointed to node, ok if not const
                 if (VN_IS(nodep->bitp(), Const)
                     && (VN_AS(nodep->bitp(), Const)->toSInt() > (frommsb - fromlsb)
                         || VN_AS(nodep->bitp(), Const)->toSInt() < 0)) {
