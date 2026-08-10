@@ -2102,8 +2102,27 @@ class ConstraintExprVisitor final : public VNVisitor {
             // Index is constant or non-rand -- format as hex literal.
             // Keep a pre-edit clone for the rand_mode hoist below.
             AstNodeExpr* const origp = nodep->cloneTree(false);
-            AstNodeExpr* const indexp
-                = new AstSFormatF{fl, "#x%8x", false, nodep->bitp()->unlinkFrBack(&handle)};
+            AstNodeExpr* bitp = nodep->bitp()->unlinkFrBack(&handle);
+            // A non-constant index (e.g. arithmetic on a foreach loop variable)
+            // isn't checked by V3Width's constant OOB warning, and can walk out
+            // of the array's bounds on iterations where the access is dead code
+            // (see vlClampArrayIndex for why that still needs handling here).
+            if (!VN_IS(bitp, Const)) {
+                if (const AstUnpackArrayDType* const adtypep
+                    = VN_CAST(nodep->fromp()->dtypep()->skipRefp(), UnpackArrayDType)) {
+                    // Keep the clamped result's dtype matching the original
+                    // index's, so the "%x" formatting below (see editSMT)
+                    // renders it exactly as it would have unclamped.
+                    AstNodeDType* const bitDtypep = bitp->dtypep();
+                    AstCExpr* const clampp = new AstCExpr{fl, AstCExpr::Pure{},
+                                                          "vlClampArrayIndex("};
+                    clampp->add(bitp);
+                    clampp->add(", " + cvtToStr(adtypep->elementsConst()) + ")");
+                    clampp->dtypep(bitDtypep);
+                    bitp = clampp;
+                }
+            }
+            AstNodeExpr* const indexp = new AstSFormatF{fl, "#x%8x", false, bitp};
             handle.relink(indexp);
             AstSFormatF* const newp = editSMT(nodep, nodep->fromp(), indexp);
             if (!newp || !hoistRandModeOverSelect(newp, origp)) {
