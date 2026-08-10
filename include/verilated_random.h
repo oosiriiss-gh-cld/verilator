@@ -788,18 +788,20 @@ inline std::string vlToSolverHex(const IData& value) {
     return oss.str();
 }
 
-// A dynamic (non-constant) array index used to name a per-element solver
-// constant -- e.g. items[i-1] inside a foreach, on iterations where a Verilog
-// 'if' guard makes the access unreachable -- may walk out of the array's
-// bounds even though it can never affect the constraint's truth value: the
-// guard lowers to an SMT '=>' whose consequent is still textually elaborated
-// on every iteration, rather than a real control-flow skip. Clamp such
-// indices into range so the generated term always names a constant that was
-// actually declared, instead of an out-of-range alias of one (e.g. index -1
-// silently reinterpreted as a large unsigned value once narrowed to the
-// array's index width). Per IEEE 1800-2023, an out-of-bounds read of a
-// fixed-size array via a non-constant index is unspecified, so any value
-// in range is a legal result.
+// A dynamic (non-constant) index into a fixed-size bound -- either a
+// per-element solver constant's array index (e.g. items[i-1] inside a
+// foreach) or a bit-select's lsb (e.g. vec[i-1] or vec[i-1 +: w]) -- on
+// iterations where a Verilog 'if' guard makes the access unreachable, may
+// walk out of bounds even though it can never affect the constraint's truth
+// value: the guard lowers to an SMT '=>' whose consequent is still
+// textually elaborated on every iteration, rather than a real control-flow
+// skip. Clamp such indices into range: for an array index, so the generated
+// term names a constant that was actually declared instead of an
+// out-of-range alias of one (e.g. index -1 silently reinterpreted as a
+// large unsigned value once narrowed to the array's index width); for a
+// bit-select lsb, because an out-of-range extract isn't even syntactically
+// valid SMT-LIB. Per IEEE 1800-2023, an out-of-bounds read via a
+// non-constant index is unspecified, so any in-range value is legal.
 inline IData vlClampArrayIndex(int32_t idx, IData size) {
     return (idx < 0 || static_cast<IData>(idx) >= size) ? 0 : static_cast<IData>(idx);
 }

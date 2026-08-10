@@ -1964,12 +1964,27 @@ class ConstraintExprVisitor final : public VNVisitor {
         if (editFormat(nodep)) return;
         VNRelinker handle;
         FileLine* const fl = nodep->fileline();
+        AstNodeExpr* lsbSrcp = nodep->lsbp()->unlinkFrBack(&handle);
+        // A non-constant lsb (e.g. arithmetic on a foreach loop variable) isn't
+        // checked by V3Width's constant OOB warning, and can walk out of
+        // fromp()'s bounds on iterations where the access is dead code (see
+        // vlClampArrayIndex). Unlike an out-of-range array index, an
+        // out-of-range extract here isn't even syntactically valid SMT-LIB,
+        // so it must be clamped before formatting rather than just named.
+        if (!VN_IS(lsbSrcp, Const)) {
+            const int maxLsb = nodep->fromp()->width() - nodep->widthConst();
+            AstNodeDType* const lsbDtypep = lsbSrcp->dtypep();
+            AstCExpr* const clampp = new AstCExpr{fl, AstCExpr::Pure{}, "vlClampArrayIndex("};
+            clampp->add(lsbSrcp);
+            clampp->add(", " + cvtToStr(maxLsb + 1) + ")");
+            clampp->dtypep(lsbDtypep);
+            lsbSrcp = clampp;
+        }
         AstNodeExpr* const msbp = new AstSFormatF{
             fl, "%1d", false,
-            new AstAdd{fl, nodep->lsbp()->cloneTreePure(false),
+            new AstAdd{fl, lsbSrcp->cloneTreePure(false),
                        new AstConst{fl, static_cast<uint32_t>(nodep->widthConst() - 1)}}};
-        AstNodeExpr* const lsbp
-            = new AstSFormatF{fl, "%1d", false, nodep->lsbp()->unlinkFrBack(&handle)};
+        AstNodeExpr* const lsbp = new AstSFormatF{fl, "%1d", false, lsbSrcp};
         handle.relink(lsbp);
 
         editSMT(nodep, nodep->fromp(), lsbp, msbp);
