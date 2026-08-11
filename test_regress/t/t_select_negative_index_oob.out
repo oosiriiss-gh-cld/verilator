@@ -1,0 +1,23 @@
+%Warning-SELRANGE: t/t_select_negative_index_oob.v:18:19: Selection index out of range: -1 outside 6:0
+                                                        : ... note: In instance 't'
+   18 |   assign out = arr[-1];
+      |                   ^
+                   ... For warning description see https://verilator.org/warn/SELRANGE?v=latest
+                   ... Use "/* verilator lint_off SELRANGE */" and lint_on around source to disable this message.
+%Warning-SELRANGE: t/t_select_negative_index_oob.v:19:21: Selection index out of range: -3 outside 2:-2
+                                                        : ... note: In instance 't'
+   19 |   assign out2 = arr2[-3];
+      |                     ^
+%Warning-SELRANGE: t/t_select_negative_index_oob.v:20:21: Selection index out of range: -1 outside 6:2
+                                                        : ... note: In instance 't'
+   20 |   assign out3 = arr3[-1];
+      |                     ^
+%Warning-SELRANGE: t/t_select_negative_index_oob.v:21:20: Selection index out of range: -1:-3 outside 4:0
+                                                        : ... note: In instance 't'
+   21 |   assign out4 = vec[-1:-3];
+      |                    ^
+%Warning-SELRANGE: t/t_select_negative_index_oob.v:22:20: Selection index out of range: 2:-2 outside 4:0
+                                                        : ... note: In instance 't'
+   22 |   assign out5 = vec[2:-2];
+      |                    ^
+%Error: Exiting due to 5 warning(s)

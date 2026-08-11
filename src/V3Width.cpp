@@ -291,6 +291,58 @@ class WidthVisitor final : public VNVisitor {
             return dtypep->skipRefOrNullp();
         return fromp ? fromp->dtypep() : nullptr;
     }
+    // Produces a warning if constant select is outside of declared msb and lsb
+    void warnSelConstOOB(AstArraySel* nodep, int32_t fromLsb, int32_t fromMsb) {
+        AstConst* bitConstp = VN_CAST(nodep->bitp(), Const);
+        if (!bitConstp) { return; }
+        int32_t bit = bitConstp->toSInt();
+        warnSelConstOOB(bit, bit, fromLsb, fromMsb, nodep);
+    }
+    // Produces a warning if constant select is outside of declared msb and lsb
+    void warnSelConstOOB(AstSel* nodep, int32_t fromLsb, int32_t fromMsb) {
+        if (!VN_IS(nodep->lsbp(), Const)) {
+            UINFO(0, "NOT CONST" << nodep->lsbp());
+            return;
+        }
+        if (!nodep->declRange().ranged()) {
+            UINFO(0, "Not ranged" << nodep);
+            return;
+        }
+        const int32_t elementWidth = nodep->declElWidth();
+        const int32_t lsb = nodep->lsbConst() / elementWidth;
+        const int32_t msb = nodep->msbConst() / elementWidth;
+        // Indexing unranged objects warning already handled in V3WidthSel
+        warnSelConstOOB(lsb, msb, fromLsb, fromMsb, nodep);
+    }
+    void warnSelConstOOB(int32_t normalizedLsb, int32_t normalizedMsb, int32_t fromLsb,
+                         int32_t fromMsb, AstNodeExpr* nodeToWarnp) {
+        // Suppress in dead/parameterized template modules
+        if (m_modep && (m_modep->dead() || m_modep->parameterizedTemplate())) { return; }
+        const int32_t fromWidth = fromMsb - fromLsb;
+        const bool highOOB = normalizedMsb > fromWidth || normalizedLsb > fromWidth;
+        // LSB should be normalized to zero, so this checks covers full and partial OOB
+        const bool lowOOB = normalizedLsb < 0;
+        const bool isOOB = highOOB || lowOOB;
+        if (!isOOB) { return; }
+        // We don't want to trigger an error here if we are just
+        // evaluating type sizes for a generate block condition. We
+        // should only trigger the error if the out-of-range access is
+        // actually generated.
+        if (m_doGenerate) {
+            UINFO(5, "Selection index out of range inside generate");
+        } else if (normalizedLsb == normalizedMsb) {
+            nodeToWarnp->v3warn(SELRANGE, "Selection index out of range: "
+                                              << (normalizedLsb + fromLsb) << " outside "
+                                              << fromMsb << ":" << fromLsb);
+        } else {
+            nodeToWarnp->v3warn(SELRANGE, "Selection index out of range: "
+                                              << (normalizedMsb + fromLsb) << ":"
+                                              << (normalizedLsb + fromLsb) << " outside "
+                                              << fromMsb << ":" << fromLsb);
+        }
+        UINFO(1, "    Related node: " << nodeToWarnp);
+    }
+
     // VISITORS
     //   Naming:  width_O{outputtype}_L{lhstype}_R{rhstype}_W{widthing}_S{signing}
     //          Where type:
@@ -1146,17 +1198,15 @@ class WidthVisitor final : public VNVisitor {
             // What is the MSB?  We want the true MSB, not one starting at
             // 0, because a 4 bit index is required to look at a one-bit
             // variable[15:15] and 5 bits for [15:-2]
-            int frommsb = nodep->fromp()->width() - 1;
-            int fromlsb = 0;
+            // Should have been declRanged in V3WidthSel
             const int elw = nodep->declElWidth();  // Must adjust to tell user bit ranges
-            if (nodep->declRange().ranged()) {
-                frommsb = nodep->declRange().hiMaxSelect() * elw
-                          + (elw - 1);  // Corrected for negative lsb
-                fromlsb = nodep->declRange().lo() * elw;
-            } else {
-                // nodep->v3fatalSrc("Should have been declRanged in V3WidthSel");
-            }
-            const int selwidth = V3Number::log2b(frommsb + 1 - 1) + 1;  // Width to address a bit
+            const bool isFromRanged = nodep->declRange().ranged();
+            const int fromMaxIndex = (isFromRanged)
+                                         ? nodep->declRange().hiMaxSelect() * elw
+                                               + (elw - 1)  // Corrected for negative lsb
+                                         : nodep->fromp()->width() - 1;
+            const int fromMinIndex = (isFromRanged) ? nodep->declRange().lo() * elw : 0;
+            const int selwidth = V3Number::log2b(fromMaxIndex) + 1;  // Width to address a bit
             AstNodeDType* const selwidthDTypep
                 = nodep->findLogicDType(selwidth, selwidth, nodep->lsbp()->dtypep()->numeric());
             userIterateAndNext(nodep->fromp(), WidthVP{SELF, FINAL}.p());
@@ -1166,7 +1216,7 @@ class WidthVisitor final : public VNVisitor {
                     nodep->v3widthWarn(
                         (selwidth / elw), (nodep->lsbp()->width() / elw),
                         "Bit extraction of var["
-                            << (frommsb / elw) << ":" << (fromlsb / elw) << "] requires "
+                            << (fromMaxIndex / elw) << ":" << (fromMinIndex / elw) << "] requires "
                             << (selwidth / elw) << " bit index, not "
                             << (nodep->lsbp()->width() / elw)
                             << (nodep->lsbp()->width() != nodep->lsbp()->widthMin()
@@ -1176,31 +1226,9 @@ class WidthVisitor final : public VNVisitor {
                     UINFO(1, "    Related node: " << nodep);
                 }
             }
-            if (VN_IS(nodep->lsbp(), Const) && nodep->msbConst() > frommsb) {
-                // See also warning in V3Const
-                // We need to check here, because the widthCheckSized may silently
-                // add another SEL which will lose the out-of-range check
-                //
-                // We don't want to trigger an error here if we are just
-                // evaluating type sizes for a generate block condition. We
-                // should only trigger the error if the out-of-range access is
-                // actually generated.
-                if (m_doGenerate) {
-                    UINFO(5, "Selection index out of range inside generate");
-                } else if (!inParameterizedTemplate) {
-                    if (nodep->declRange().ranged()) {
-                        nodep->v3warn(SELRANGE, "Selection index out of range: "
-                                                    << nodep->msbConst() << ":"
-                                                    << nodep->lsbConst() << " outside " << frommsb
-                                                    << ":" << fromlsb);
-                    } else {
-                        nodep->v3warn(SELRANGE,
-                                      "Selection "
-                                          << nodep->msbConst() << ":" << nodep->lsbConst()
-                                          << " performed on an object without declared range");
-                    }
-                    UINFO(1, "    Related node: " << nodep);
-                }
+
+
+            if (VN_IS(nodep->lsbp(), Const) && nodep->msbConst() > fromMaxIndex) {
                 if (lrefp) UINFO(9, "    Select extend lrefp " << lrefp);
                 // Extend unless it's a lvalue,
                 // because extending lvalue would lose write access.
@@ -1213,6 +1241,12 @@ class WidthVisitor final : public VNVisitor {
                                     false /*noerror*/);
                 }
             }
+
+            //UINFO(0, "fromMinIndex=" << fromMinIndex << " fromMaxIndex=" << fromMaxIndex);
+            // UINFO(0, "lsb=" << fromMinIndex / elw << " msb=" << fromMaxIndex / elw);
+            V3Const::constifyEdit(nodep->lsbp());
+            // Must check bounds before adding a select that truncates the bound.
+            warnSelConstOOB(nodep, fromMinIndex / elw, fromMaxIndex / elw);
             // iterate FINAL is two blocks above
             //
             // If we have a width problem with GENERATE etc, this will reduce
@@ -1226,7 +1260,6 @@ class WidthVisitor final : public VNVisitor {
                 widthCheckSized(nodep, "Extract Range", nodep->lsbp(), selwidthDTypep, EXTEND_EXP,
                                 false /*NOWARN*/);
             }
-            // UINFOTREE(9, nodep, "", "seldone");
         }
     }
 
@@ -1246,8 +1279,6 @@ class WidthVisitor final : public VNVisitor {
                 frommsb = adtypep->hi();
                 fromlsb = adtypep->lo();
                 if (fromlsb > frommsb) std::swap(frommsb, fromlsb);
-                // However, if the lsb<0 we may go negative, so need more bits!
-                if (fromlsb < 0) frommsb += -fromlsb;
                 nodep->dtypeFrom(adtypep->subDTypep());  // Need to strip off array reference
             } else {
                 // Note PackArrayDType doesn't use an ArraySel but a normal Sel.
@@ -1255,7 +1286,9 @@ class WidthVisitor final : public VNVisitor {
                 nodep->v3fatalSrc("Array reference exceeds dimension of array");
                 frommsb = fromlsb = 0;
             }
-            const int selwidth = V3Number::log2b(frommsb + 1 - 1) + 1;  // Width to address a bit
+            // If fromLsb < 0 we need more bits to correctly address up to MSB
+            uint32_t rangeSelMsb = (fromlsb < 0) ? (frommsb - fromlsb) : frommsb;
+            const int selwidth = V3Number::log2b(rangeSelMsb) + 1;  // Width to address a bit
             AstNodeDType* const selwidthDTypep
                 = nodep->findLogicDType(selwidth, selwidth, nodep->bitp()->dtypep()->numeric());
             if (widthBad(nodep->bitp(), selwidthDTypep) && nodep->bitp()->width() != 32) {
@@ -1273,19 +1306,9 @@ class WidthVisitor final : public VNVisitor {
                 }
             }
             if (!m_doGenerate) {
-                // Must check bounds before adding a select that truncates the bound
-                // Note we've already subtracted off LSB
-                if (VN_IS(nodep->bitp(), Const)
-                    && (VN_AS(nodep->bitp(), Const)->toSInt() > (frommsb - fromlsb)
-                        || VN_AS(nodep->bitp(), Const)->toSInt() < 0)) {
-                    // Suppress in dead/parameterized template modules
-                    if (!(m_modep && (m_modep->dead() || m_modep->parameterizedTemplate()))) {
-                        nodep->v3warn(SELRANGE,
-                                      "Selection index out of range: "
-                                          << (VN_AS(nodep->bitp(), Const)->toSInt() + fromlsb)
-                                          << " outside " << frommsb << ":" << fromlsb);
-                    }
-                }
+                // Must check bounds before adding a select that truncates the bound.
+                // Ranged array OOB select warning is in AstSliceSel
+                warnSelConstOOB(nodep, fromlsb, frommsb);
                 widthCheckSized(nodep, "Extract Range", nodep->bitp(), selwidthDTypep, EXTEND_EXP,
                                 false /*NOWARN*/);
             }

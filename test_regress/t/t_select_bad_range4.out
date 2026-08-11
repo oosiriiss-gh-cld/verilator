@@ -27,7 +27,7 @@
       |              ^
                    ... For warning description see https://verilator.org/warn/SELRANGE?v=latest
                    ... Use "/* verilator lint_off SELRANGE */" and lint_on around source to disable this message.
-%Warning-SELRANGE: t/t_select_bad_range4.v:24:14: Selection index out of range: 536870915:4 outside 45:40
+%Warning-SELRANGE: t/t_select_bad_range4.v:24:14: Selection index out of range: 536870955:44 outside 45:40
                                                 : ... note: In instance 't'
    24 |     sel2 = mi[44+:1<<29];
       |              ^
@@ -73,7 +73,7 @@
                                                 : ... note: In instance 't'
    28 |     sel2 = mi[1<<29 : 0];
       |              ^
-%Warning-SELRANGE: t/t_select_bad_range4.v:28:14: Selection index out of range: 536870872:-40 outside 45:40
+%Warning-SELRANGE: t/t_select_bad_range4.v:28:14: Selection index out of range: 536870912:0 outside 45:40
                                                 : ... note: In instance 't'
    28 |     sel2 = mi[1<<29 : 0];
       |              ^

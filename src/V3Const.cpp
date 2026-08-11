@@ -1735,42 +1735,14 @@ class ConstVisitor final : public VNVisitor {
         }
         // Find range of dtype we are selecting from
         // Similar code in V3Unknown::AstSel
-        const bool doit = true;
-        if (m_warn && VN_IS(nodep->lsbp(), Const) && doit) {
-            const int maxDeclBit = nodep->declRange().hiMaxSelect() * nodep->declElWidth()
-                                   + (nodep->declElWidth() - 1);
-            if (VN_AS(nodep->lsbp(), Const)->num().isFourState()) {
-                nodep->v3error("Selection index is constantly unknown or tristated: "
-                               "lsb="
-                               << nodep->lsbp()->name() << " width=" << nodep->widthConst());
-                // Replacing nodep will make a mess above, so we replace the offender
-                replaceZero(nodep->lsbp());
-            } else if (nodep->declRange().ranged()
-                       && (nodep->msbConst() > maxDeclBit || nodep->lsbConst() > maxDeclBit)) {
-                // See also warning in V3Width
-                // Must adjust by element width as declRange() is in number of elements
-                string msbLsbProtected;
-                if (nodep->declElWidth() == 0) {
-                    msbLsbProtected = "(nodep->declElWidth() == 0) "
-                                      + std::to_string(nodep->msbConst()) + ":"
-                                      + std::to_string(nodep->lsbConst());
-                } else {
-                    msbLsbProtected = std::to_string(nodep->msbConst() / nodep->declElWidth())
-                                      + ":"
-                                      + std::to_string(nodep->lsbConst() / nodep->declElWidth());
-                }
-                nodep->v3warn(SELRANGE,
-                              "Selection index out of range: "
-                                  << msbLsbProtected << " outside "
-                                  << nodep->declRange().hiMaxSelect() << ":0"
-                                  << (nodep->declRange().lo() >= 0
-                                          ? ""
-                                          : (" (adjusted +" + cvtToStr(-nodep->declRange().lo())
-                                             + " to account for negative lsb)")));
-                UINFO(1, "    Related Raw index is " << nodep->msbConst() << ":"
-                                                     << nodep->lsbConst());
-                // Don't replace with zero, we'll do it later
-            }
+        AstConst* lsbConstp = VN_CAST(nodep->lsbp(), Const);
+        if (!m_warn || !lsbConstp) { return false; }
+        if (lsbConstp->num().isFourState()) {
+            nodep->v3error("Selection index is constantly unknown or tristated: "
+                           "lsb="
+                           << nodep->lsbp()->name() << " width=" << nodep->widthConst());
+            // Replacing nodep will make a mess above, so we replace the offender
+            replaceZero(nodep->lsbp());
         }
         return false;  // Not a transform, so NOP
     }

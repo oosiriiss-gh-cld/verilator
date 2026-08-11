@@ -46,12 +46,13 @@ class WidthSelVisitor final : public VNVisitor {
 
     // METHODS
 
-    void checkConstantOrReplace(AstNode* nodep, const string& message) {
+    void checkConstantOrReplace(AstNode* nodep, const string& message, uint32_t replaceWith = 1) {
         // See also V3Width::checkConstantOrReplace
         // Note can't call V3Const::constifyParam(nodep) here, as constify may change nodep on us!
         if (!VN_IS(nodep, Const)) {
             nodep->v3error(message);
-            nodep->replaceWith(new AstConst{nodep->fileline(), AstConst::Unsized32{}, 1});
+            nodep->replaceWith(
+                new AstConst{nodep->fileline(), AstConst::Unsized32{}, replaceWith});
             VL_DO_DANGLING(pushDeletep(nodep), nodep);
         }
     }
@@ -229,6 +230,8 @@ class WidthSelVisitor final : public VNVisitor {
         UINFO(6, "SELBIT " << nodep);
         UINFOTREE(9, nodep->backp(), "", "SELBT0");
         // lhsp/rhsp do not need to be constant
+        V3Width::widthParamsEdit(nodep->bitp());  // constifyEdit doesn't ensure widths finished
+        V3Const::constifyEdit(nodep->bitp());  // May relink pointed to node, ok if not const
         AstNodeExpr* const fromp = nodep->fromp()->unlinkFrBack();
         AstNodeExpr* const rhsp = nodep->bitp()->unlinkFrBack();  // bit we're extracting
         UINFOTREE(9, nodep, "", "SELBT2");
@@ -415,10 +418,14 @@ class WidthSelVisitor final : public VNVisitor {
             return;
         }
         // Non-queue
-        checkConstantOrReplace(nodep->leftp(),
-                               "First value of [a:b] isn't a constant, maybe you want +: or -:");
-        checkConstantOrReplace(nodep->rightp(),
-                               "Second value of [a:b] isn't a constant, maybe you want +: or -:");
+        // We replace the non-constant with a value that is in range of from's declared range avoid
+        // producing a warning for the new, replaced constant is OOB in AstSel and AstArraySel
+        checkConstantOrReplace(
+            nodep->leftp(),
+            "First value of [a:b] isn't a constant, maybe you want +: or -:", fromRange.lo());
+        checkConstantOrReplace(
+            nodep->rightp(),
+            "Second value of [a:b] isn't a constant, maybe you want +: or -:", fromRange.lo());
         AstNodeExpr* const msbp = nodep->leftp()->unlinkFrBack();
         AstNodeExpr* const lsbp = nodep->rightp()->unlinkFrBack();
         int32_t msb = VN_AS(msbp, Const)->toSInt();
