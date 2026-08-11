@@ -168,14 +168,25 @@ class WidthSelVisitor final : public VNVisitor {
         }
     }
     AstNodeExpr* newMulConst(FileLine* fl, uint32_t elwidth, AstNodeExpr* indexp) {
+        const int width = std::max(V3Number::log2b(elwidth) + 1, indexp->widthMin());
+        if (AstConst* const constp = VN_CAST(indexp, Const)) {
+            // indexp isn't linked into the tree yet, so V3Const can't be used here
+            // (it needs a backp() to replaceWith); fold by hand instead, same trick
+            // as newSubNeg() above.
+            V3Number num{constp, 32};
+            num.opMul(V3Number{constp, 32, elwidth}, constp->num());
+            AstConst* const newp = new AstConst{fl, num};
+            newp->dtypeSetLogicUnsized(32, width, VSigning::UNSIGNED);
+            VL_DO_DANGLING(pushDeletep(indexp), indexp);
+            return newp;
+        }
         AstNodeExpr* extendp;
         if (indexp->width() > 32) {
             extendp = new AstSel{fl, indexp, 0, 32};
         } else {
             extendp = new AstExtend{fl, indexp};
         }
-        extendp->dtypeSetLogicUnsized(
-            32, std::max(V3Number::log2b(elwidth) + 1, indexp->widthMin()), VSigning::UNSIGNED);
+        extendp->dtypeSetLogicUnsized(32, width, VSigning::UNSIGNED);
         AstNodeExpr* const mulp
             = new AstMul{fl, new AstConst{fl, AstConst::Unsized32{}, elwidth},
                          // Extend needed as index might be e.g. 3 bits but constant e.g. 5 bits
