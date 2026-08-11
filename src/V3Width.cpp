@@ -1149,14 +1149,16 @@ class WidthVisitor final : public VNVisitor {
             int frommsb = nodep->fromp()->width() - 1;
             int fromlsb = 0;
             const int elw = nodep->declElWidth();  // Must adjust to tell user bit ranges
+            uint32_t fromElements = frommsb + 1;
             if (nodep->declRange().ranged()) {
                 frommsb = nodep->declRange().hiMaxSelect() * elw
                           + (elw - 1);  // Corrected for negative lsb
                 fromlsb = nodep->declRange().lo() * elw;
+                fromElements = nodep->declRange().elements() * elw;
             } else {
                 // nodep->v3fatalSrc("Should have been declRanged in V3WidthSel");
             }
-            const int selwidth = V3Number::log2b(frommsb + 1 - 1) + 1;  // Width to address a bit
+            const int selwidth = V3Number::log2b(fromElements - 1) + 1;  // Width to address a bit
             AstNodeDType* const selwidthDTypep
                 = nodep->findLogicDType(selwidth, selwidth, nodep->lsbp()->dtypep()->numeric());
             userIterateAndNext(nodep->fromp(), WidthVP{SELF, FINAL}.p());
