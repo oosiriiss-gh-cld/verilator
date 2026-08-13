@@ -1080,8 +1080,9 @@ double V3Number::toDouble() const VL_MT_SAFE {
     return u.d;
 }
 
-int32_t V3Number::toSInt() const VL_MT_SAFE {
-    if (isSigned()) {
+int32_t V3Number::toSInt() const VL_MT_SAFE { return toSInt(isSigned()); }
+int32_t V3Number::toSInt(bool doSigned) const VL_MT_SAFE {
+    if (doSigned) {
         const uint32_t v = toUInt();
         const uint32_t signExtend = (-(v & (1UL << (width() - 1))));
         const uint32_t extended = v | signExtend;

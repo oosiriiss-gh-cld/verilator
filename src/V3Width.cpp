@@ -291,6 +291,13 @@ class WidthVisitor final : public VNVisitor {
             return dtypep->skipRefOrNullp();
         return fromp ? fromp->dtypep() : nullptr;
     }
+    // Checks if node can ever be negative, positive constants will never be negative
+    static bool maybeNegative(const AstNodeExpr* const nodep) {
+        const AstConst* const constp = VN_CAST(nodep, Const);
+        if (!constp) { return nodep->isSigned(); }
+        return constp->isSigned() && constp->num().isNegative();
+    }
+
     // VISITORS
     //   Naming:  width_O{outputtype}_L{lhstype}_R{rhstype}_W{widthing}_S{signing}
     //          Where type:
@@ -1156,9 +1163,14 @@ class WidthVisitor final : public VNVisitor {
             } else {
                 // nodep->v3fatalSrc("Should have been declRanged in V3WidthSel");
             }
-            const int selwidth = V3Number::log2b(frommsb + 1 - 1) + 1;  // Width to address a bit
+            // TODO :: Same as AstArraySel, refactor
+            // Signed numbers need one more bit
+            const bool lsbMaybeNegative = maybeNegative(nodep->lsbp());
+            const int32_t signBit = (lsbMaybeNegative) ? 1 : 0;
+            const int selwidth
+                = V3Number::log2b(frommsb + 1 - 1) + 1 + signBit;  // Width to address a bit
             AstNodeDType* const selwidthDTypep
-                = nodep->findLogicDType(selwidth, selwidth, nodep->lsbp()->dtypep()->numeric());
+                = nodep->findLogicDType(selwidth, selwidth, VSigning::fromBool(lsbMaybeNegative));
             userIterateAndNext(nodep->fromp(), WidthVP{SELF, FINAL}.p());
             userIterateAndNext(nodep->lsbp(), WidthVP{SELF, FINAL}.p());
             if (widthBad(nodep->lsbp(), selwidthDTypep) && nodep->lsbp()->width() != 32) {
@@ -1255,9 +1267,15 @@ class WidthVisitor final : public VNVisitor {
                 nodep->v3fatalSrc("Array reference exceeds dimension of array");
                 frommsb = fromlsb = 0;
             }
-            const int selwidth = V3Number::log2b(frommsb + 1 - 1) + 1;  // Width to address a bit
+            // TODO :: Same as AstSel, refactor
+            // Signed numbers need one more bit
+            const bool bitMaybeNegative = maybeNegative(nodep->bitp());
+            const int32_t signBit = (bitMaybeNegative) ? 1 : 0;
+            const int selwidth
+                = V3Number::log2b(frommsb + 1 - 1) + 1 + signBit;  // Width to address a bit
             AstNodeDType* const selwidthDTypep
-                = nodep->findLogicDType(selwidth, selwidth, nodep->bitp()->dtypep()->numeric());
+                = nodep->findLogicDType(selwidth, selwidth, VSigning::fromBool(bitMaybeNegative));
+
             if (widthBad(nodep->bitp(), selwidthDTypep) && nodep->bitp()->width() != 32) {
                 nodep->v3widthWarn(selwidth, nodep->bitp()->width(),
                                    "Bit extraction of array["

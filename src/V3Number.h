@@ -715,6 +715,7 @@ public:
     bool fitsInUInt() const VL_MT_SAFE;
     uint32_t toUInt() const VL_MT_SAFE;
     int32_t toSInt() const VL_MT_SAFE;
+    int32_t toSInt(bool doSigned) const VL_MT_SAFE;
     uint64_t toUQuad() const VL_MT_SAFE;
     int64_t toSQuad() const VL_MT_SAFE;
     string toString() const VL_MT_SAFE;
