@@ -15,14 +15,14 @@ module t (
   // produces an AstArraySel rather than an AstSel.
   localparam logic MASK[4] = '{1'b1, 1'b1, 1'b0, 1'b0};
 
+  logic [3:0] out;
+
   generate
     genvar g;
     for (g = 0; g < 4; g = g + 1) begin
       if (MASK[g]) begin
         always @(posedge clk) begin
-`ifdef TEST_VERBOSE
-          $write("MASK[%1d] = %d\n", g, MASK[g]);
-`endif
+          out[g] <= MASK[g];
         end
       end
     end
