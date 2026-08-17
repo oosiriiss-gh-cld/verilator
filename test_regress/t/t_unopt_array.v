@@ -87,7 +87,9 @@ module Test (  /*AUTOARG*/
     for (g = 0; g < 4; g++) begin
       always_comb begin
         if (g == 0) stage[g] = {4{in}};
+        /* verilator lint_off SELRANGE */
         else stage[g] = {4{stage[g-1][0][30:0], 1'b1}};
+        /* verilator lint_on SELRANGE */
       end
     end
   endgenerate

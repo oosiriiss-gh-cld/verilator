@@ -1725,56 +1725,13 @@ class ConstVisitor final : public VNVisitor {
         if (constp->num().isBitsZero(constp->width() - 1, subsize)) return false;
         return true;
     }
-
-    // Extraction checks
-    bool warnSelect(AstSel* nodep) {
-        if (m_doGenerate) {
-            // Never checked yet
-            V3Width::widthParamsEdit(nodep);
-            iterateChildren(nodep);  // May need "constifying"
-        }
-        // Find range of dtype we are selecting from
-        // Similar code in V3Unknown::AstSel
-        const bool doit = true;
-        if (m_warn && VN_IS(nodep->lsbp(), Const) && doit) {
-            const int maxDeclBit = nodep->declRange().hiMaxSelect() * nodep->declElWidth()
-                                   + (nodep->declElWidth() - 1);
-            if (VN_AS(nodep->lsbp(), Const)->num().isFourState()) {
-                nodep->v3error("Selection index is constantly unknown or tristated: "
-                               "lsb="
-                               << nodep->lsbp()->name() << " width=" << nodep->widthConst());
-                // Replacing nodep will make a mess above, so we replace the offender
-                replaceZero(nodep->lsbp());
-            } else if (nodep->declRange().ranged()
-                       && (nodep->msbConst() > maxDeclBit || nodep->lsbConst() > maxDeclBit)) {
-                // See also warning in V3Width
-                // Must adjust by element width as declRange() is in number of elements
-                string msbLsbProtected;
-                if (nodep->declElWidth() == 0) {
-                    msbLsbProtected = "(nodep->declElWidth() == 0) "
-                                      + std::to_string(nodep->msbConst()) + ":"
-                                      + std::to_string(nodep->lsbConst());
-                } else {
-                    msbLsbProtected = std::to_string(nodep->msbConst() / nodep->declElWidth())
-                                      + ":"
-                                      + std::to_string(nodep->lsbConst() / nodep->declElWidth());
-                }
-                nodep->v3warn(SELRANGE,
-                              "Selection index out of range: "
-                                  << msbLsbProtected << " outside "
-                                  << nodep->declRange().hiMaxSelect() << ":0"
-                                  << (nodep->declRange().lo() >= 0
-                                          ? ""
-                                          : (" (adjusted +" + cvtToStr(-nodep->declRange().lo())
-                                             + " to account for negative lsb)")));
-                UINFO(1, "    Related Raw index is " << nodep->msbConst() << ":"
-                                                     << nodep->lsbConst());
-                // Don't replace with zero, we'll do it later
-            }
-        }
+    bool warnGenerateSelect(AstSel* nodep) {
+        if (!m_doGenerate) { return false; }
+        // We warn only if the expression is actually reached and not short circuited
+        V3Width::widthParamsEdit(nodep);  // Never checked yet
+        iterateChildren(nodep);  // May need "constifying"
         return false;  // Not a transform, so NOP
     }
-
     static bool operandsSame(const AstNode* node1p, const AstNode* node2p) {
         // For now we just detect constants & simple vars, though it could be more generic
         if (const AstConst* const const1p = VN_CAST(node1p, Const)) {
@@ -4284,7 +4241,7 @@ class ConstVisitor final : public VNVisitor {
     //    v--- *A* This op works on (A)ll constant children, allowed in m_doConst mode
     //    v--- *S* This op specifies a type should use (S)hort-circuiting of its lhs op
 
-    TREEOP1("AstSel{warnSelect(nodep)}",        "NEVER");
+    TREEOP1("AstSel{warnGenerateSelect(nodep)}",        "NEVER");
     // Generic constants on both side.  Do this first to avoid other replacements
     TREEOPA("AstNodeBiop {$lhsp.castConst, $rhsp.castConst, nodep->isPredictOptimizable()}",  "replaceConst(nodep)");
     TREEOPA("AstNodeUniop{$lhsp.castConst, !nodep->isOpaque(), nodep->isPredictOptimizable()}",  "replaceConst(nodep)");

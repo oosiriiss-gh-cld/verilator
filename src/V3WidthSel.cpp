@@ -46,12 +46,13 @@ class WidthSelVisitor final : public VNVisitor {
 
     // METHODS
 
-    void checkConstantOrReplace(AstNode* nodep, const string& message) {
+    void checkConstantOrReplace(AstNode* nodep, const string& message, uint32_t replaceWith = 1) {
         // See also V3Width::checkConstantOrReplace
         // Note can't call V3Const::constifyParam(nodep) here, as constify may change nodep on us!
         if (!VN_IS(nodep, Const)) {
             nodep->v3error(message);
-            nodep->replaceWith(new AstConst{nodep->fileline(), AstConst::Unsized32{}, 1});
+            nodep->replaceWith(
+                new AstConst{nodep->fileline(), AstConst::Unsized32{}, replaceWith});
             VL_DO_DANGLING(pushDeletep(nodep), nodep);
         }
     }
@@ -213,11 +214,14 @@ class WidthSelVisitor final : public VNVisitor {
         }
     }
 
-    void warnTri(AstNode* nodep) {
-        if (VN_IS(nodep, Const) && VN_AS(nodep, Const)->num().isFourState()) {
-            nodep->v3error(
-                "Selection index is constantly unknown or tristated: " << nodep->name());
+    bool warnTriAndReplace(AstNodeExpr* nodep, AstNode* lsbp) {
+        if (VN_IS(lsbp, Const) && VN_AS(lsbp, Const)->num().isFourState()) {
+            lsbp->v3error("Selection index is constantly unknown or tristated: " << lsbp->name());
+            nodep->replaceWith(new AstConst{nodep->fileline(), AstConst::Unsized32{}, 0});
+            VL_DO_DANGLING(pushDeletep(nodep), nodep);
+            return true;
         }
+        return false;
     }
 
     // VISITORS
@@ -229,6 +233,9 @@ class WidthSelVisitor final : public VNVisitor {
         UINFO(6, "SELBIT " << nodep);
         UINFOTREE(9, nodep->backp(), "", "SELBT0");
         // lhsp/rhsp do not need to be constant
+        V3Width::widthParamsEdit(nodep->bitp());  // constifyEdit doesn't ensure widths finished
+        V3Const::constifyEdit(nodep->bitp());  // May relink pointed to node, ok if not const
+        if (warnTriAndReplace(nodep, nodep->bitp())) { return; }
         AstNodeExpr* const fromp = nodep->fromp()->unlinkFrBack();
         AstNodeExpr* const rhsp = nodep->bitp()->unlinkFrBack();  // bit we're extracting
         UINFOTREE(9, nodep, "", "SELBT2");
@@ -376,6 +383,10 @@ class WidthSelVisitor final : public VNVisitor {
         // Below 2 lines may change nodep->widthp()
         V3Const::constifyParamsNoWarnEdit(nodep->leftp());  // May relink pointed to node
         V3Const::constifyParamsNoWarnEdit(nodep->rightp());  // May relink pointed to node
+        if (warnTriAndReplace(nodep, nodep->leftp())
+            || warnTriAndReplace(nodep, nodep->rightp())) {
+            return;
+        }
         // UINFOTREE(9, nodep, "", "SELEX3");
         AstNodeExpr* const fromp = nodep->fromp()->unlinkFrBack();
         const FromData fromdata = fromDataForArray(nodep, fromp);
@@ -415,10 +426,16 @@ class WidthSelVisitor final : public VNVisitor {
             return;
         }
         // Non-queue
-        checkConstantOrReplace(nodep->leftp(),
-                               "First value of [a:b] isn't a constant, maybe you want +: or -:");
-        checkConstantOrReplace(nodep->rightp(),
-                               "Second value of [a:b] isn't a constant, maybe you want +: or -:");
+        //
+        // We replace the non-constant with a value that is in range of from's declared range to
+        // avoid producing a warning that the new, replaced constant is OOB in AstSel and
+        // AstArraySel
+        checkConstantOrReplace(
+            nodep->leftp(),
+            "First value of [a:b] isn't a constant, maybe you want +: or -:", fromRange.lo());
+        checkConstantOrReplace(
+            nodep->rightp(),
+            "Second value of [a:b] isn't a constant, maybe you want +: or -:", fromRange.lo());
         AstNodeExpr* const msbp = nodep->leftp()->unlinkFrBack();
         AstNodeExpr* const lsbp = nodep->rightp()->unlinkFrBack();
         int32_t msb = VN_AS(msbp, Const)->toSInt();
@@ -528,6 +545,9 @@ class WidthSelVisitor final : public VNVisitor {
         V3Width::widthParamsEdit(nodep->rhsp());  // constifyEdit doesn't ensure widths finished
         V3Const::constifyEdit(nodep->rhsp());  // May relink pointed to node, ok if not const
         V3Const::constifyParamsEdit(nodep->thsp());  // May relink pointed to node
+        if (warnTriAndReplace(nodep, nodep->rhsp()) || warnTriAndReplace(nodep, nodep->thsp())) {
+            return;
+        }
         checkConstantOrReplace(nodep->thsp(),
                                "Width of :+ or :- bit slice range isn't a constant");
         UINFOTREE(9, nodep, "", "SELPM3");
@@ -535,7 +555,6 @@ class WidthSelVisitor final : public VNVisitor {
         AstNodeExpr* const fromp = nodep->fromp()->unlinkFrBack();
         AstNodeExpr* const rhsp = nodep->rhsp()->unlinkFrBack();
         AstNodeExpr* const widthp = nodep->thsp()->unlinkFrBack();
-        warnTri(rhsp);
         const int width = VN_AS(widthp, Const)->toSInt();
         if (width > (1 << 28)) {
             nodep->v3error("Width of :+ or :- is huge; vector of over 1 billion bits: "
