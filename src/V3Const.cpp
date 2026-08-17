@@ -1726,16 +1726,6 @@ class ConstVisitor final : public VNVisitor {
         return true;
     }
 
-    // Extraction checks
-    bool warnSelect(AstSel* nodep) {
-        if (m_doGenerate) {
-            // Never checked yet
-            V3Width::widthParamsEdit(nodep);
-            iterateChildren(nodep);  // May need "constifying"
-        }
-        return false;  // Not a transform, so NOP
-    }
-
     static bool operandsSame(const AstNode* node1p, const AstNode* node2p) {
         // For now we just detect constants & simple vars, though it could be more generic
         if (const AstConst* const const1p = VN_CAST(node1p, Const)) {
@@ -4245,7 +4235,6 @@ class ConstVisitor final : public VNVisitor {
     //    v--- *A* This op works on (A)ll constant children, allowed in m_doConst mode
     //    v--- *S* This op specifies a type should use (S)hort-circuiting of its lhs op
 
-    TREEOP1("AstSel{warnSelect(nodep)}",        "NEVER");
     // Generic constants on both side.  Do this first to avoid other replacements
     TREEOPA("AstNodeBiop {$lhsp.castConst, $rhsp.castConst, nodep->isPredictOptimizable()}",  "replaceConst(nodep)");
     TREEOPA("AstNodeUniop{$lhsp.castConst, !nodep->isOpaque(), nodep->isPredictOptimizable()}",  "replaceConst(nodep)");
