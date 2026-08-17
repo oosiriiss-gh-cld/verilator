@@ -1,4 +1,4 @@
-%Warning-SELRANGE: t/t_select_bad_range.v:17:13: Selection index out of range: 44:44 outside 43:0
+%Warning-SELRANGE: t/t_select_bad_range.v:17:13: Selection index out of range: 44 outside 43:0
                                                : ... note: In instance 't'
    17 |     sel = mi[44];
       |             ^

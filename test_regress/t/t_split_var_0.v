@@ -140,7 +140,7 @@ module barshift_2d_unpacked #(parameter DEPTH = 2, localparam WIDTH = 2**DEPTH)
   assign tmp11[-1] = tmp11[1];
   assign tmp11[0] = tmp11[-1];
   assign tmp12 = tmp11[0:1];
-  assign out = tmp12[1][DEPTH+OFFSET][OFFSET];
+  assign out = tmp12[-1][DEPTH+OFFSET][OFFSET];
 endmodule
 
 

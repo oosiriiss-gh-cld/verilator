@@ -4,9 +4,13 @@
       |              ^~~~~~~
                        ... For warning description see https://verilator.org/warn/UNUSEDSIGNAL?v=latest
                        ... Use "/* verilator lint_off UNUSEDSIGNAL */" and lint_on around source to disable this message.
+%Warning-UNUSEDSIGNAL: t/t_lint_unused_bad.v:19:14: Bits of signal are not used: 'assunub2'[2]
+                                                  : ... note: In instance 't.sub'
+   19 |   wire [3:0] assunub2 = 0;
+      |              ^~~~~~~~
 %Warning-UNDRIVEN: t/t_lint_unused_bad.v:21:16: Bits of signal are not driven: 'udrb2'[14:13,11]
                                               : ... note: In instance 't.sub'
-   21 |   wire [15:10] udrb2;   
+   21 |   wire [15:10] udrb2;
       |                ^~~~~
                    ... For warning description see https://verilator.org/warn/UNDRIVEN?v=latest
                    ... Use "/* verilator lint_off UNDRIVEN */" and lint_on around source to disable this message.

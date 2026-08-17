@@ -402,7 +402,6 @@ class UnknownVisitor final : public VNVisitor {
                 lvalue = varrefp->access().isWriteOrRW();
             }
             // Find range of dtype we are selecting from
-            // Similar code in V3Const::warnSelect
             const uint32_t maxmsb = nodep->fromp()->dtypep()->width() - 1;
             UINFOTREE(9, nodep, "", "sel_old");
 
