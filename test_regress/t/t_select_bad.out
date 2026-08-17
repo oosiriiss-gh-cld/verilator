@@ -1,29 +1,29 @@
 %Warning-SELRANGE: t/t_select_bad.v:36:27: Selection index out of range: -1 outside 6:0
                                          : ... note: In instance 't'
-   36 |     void'(sink(logic'(arr1[-1] | arr1[8])));
+   36 |     void'(sink(logic'(arr1[-1] | arr1[8])));   
       |                           ^
                    ... For warning description see https://verilator.org/warn/SELRANGE?v=latest
                    ... Use "/* verilator lint_off SELRANGE */" and lint_on around source to disable this message.
 %Warning-SELRANGE: t/t_select_bad.v:36:38: Selection index out of range: 8 outside 6:0
                                          : ... note: In instance 't'
-   36 |     void'(sink(logic'(arr1[-1] | arr1[8])));
+   36 |     void'(sink(logic'(arr1[-1] | arr1[8])));   
       |                                      ^
 %Error: t/t_select_bad.v:37:27: Slice selection index '[-2:2]' outside data type's '[0:6]'
                               : ... note: In instance 't'
-   37 |     void'(sink(logic'(arr1[-2:2] | arr1[-6:-2])));
+   37 |     void'(sink(logic'(arr1[-2:2] | arr1[-6:-2])));   
       |                           ^
         ... See the manual at https://verilator.org/verilator_doc.html?v=latest for more assistance.
 %Error: t/t_select_bad.v:37:40: Slice selection index '[-6:-2]' outside data type's '[0:6]'
                               : ... note: In instance 't'
-   37 |     void'(sink(logic'(arr1[-2:2] | arr1[-6:-2])));
+   37 |     void'(sink(logic'(arr1[-2:2] | arr1[-6:-2])));   
       |                                        ^
 %Error: t/t_select_bad.v:38:27: Slice selection index '[5:8]' outside data type's '[0:6]'
                               : ... note: In instance 't'
-   38 |     void'(sink(logic'(arr1[5:8] | arr1[8:11])));
+   38 |     void'(sink(logic'(arr1[5:8] | arr1[8:11])));   
       |                           ^
 %Error: t/t_select_bad.v:38:39: Slice selection index '[8:11]' outside data type's '[0:6]'
                               : ... note: In instance 't'
-   38 |     void'(sink(logic'(arr1[5:8] | arr1[8:11])));
+   38 |     void'(sink(logic'(arr1[5:8] | arr1[8:11])));   
       |                                       ^
 %Warning-SELRANGE: t/t_select_bad.v:40:27: Selection index out of range: 4 outside 9:5
                                          : ... note: In instance 't'
