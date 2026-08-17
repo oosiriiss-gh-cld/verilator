@@ -1726,16 +1726,6 @@ class ConstVisitor final : public VNVisitor {
         return true;
     }
 
-    // Extraction checks
-    bool warnSelect(AstSel* nodep) {
-        if (m_doGenerate) {
-            // Never checked yet
-            V3Width::widthParamsEdit(nodep);
-            iterateChildren(nodep);  // May need "constifying"
-        }
-        return false;  // Not a transform, so NOP
-    }
-
     static bool operandsSame(const AstNode* node1p, const AstNode* node2p) {
         // For now we just detect constants & simple vars, though it could be more generic
         if (const AstConst* const const1p = VN_CAST(node1p, Const)) {
@@ -1930,6 +1920,14 @@ class ConstVisitor final : public VNVisitor {
         VL_DO_DANGLING(replaceNum(nodep, num), nodep);
     }
     void replaceConst(AstNodeBiop* nodep) {
+        if (m_doGenerate) {
+            // About to fold this node into a plain constant, discarding its
+            // declRange()/OOB metadata. This is the last chance to check bounds
+            // with warnings enabled (they are suppressed while widthing generate
+            // conditions, since short-circuiting may prune this node before it is
+            // ever really evaluated; if we get here, it survived and is really used).
+            if (AstSel* const selp = VN_CAST(nodep, Sel)) V3Width::widthParamsEdit(selp);
+        }
         V3Number numv{nodep, nodep->widthMinV()};
         nodep->numberOperate(numv, constNumV(nodep->lhsp()), constNumV(nodep->rhsp()));
         const V3Number& num = toNumC(nodep, numv);
@@ -4245,7 +4243,6 @@ class ConstVisitor final : public VNVisitor {
     //    v--- *A* This op works on (A)ll constant children, allowed in m_doConst mode
     //    v--- *S* This op specifies a type should use (S)hort-circuiting of its lhs op
 
-    TREEOP1("AstSel{warnSelect(nodep)}",        "NEVER");
     // Generic constants on both side.  Do this first to avoid other replacements
     TREEOPA("AstNodeBiop {$lhsp.castConst, $rhsp.castConst, nodep->isPredictOptimizable()}",  "replaceConst(nodep)");
     TREEOPA("AstNodeUniop{$lhsp.castConst, !nodep->isOpaque(), nodep->isPredictOptimizable()}",  "replaceConst(nodep)");
