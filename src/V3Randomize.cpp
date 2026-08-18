@@ -2133,42 +2133,26 @@ class ConstraintExprVisitor final : public VNVisitor {
             // Index is constant or non-rand -- format as hex literal.
             // Keep a pre-edit clone for the rand_mode hoist below.
             AstNodeExpr* const origp = nodep->cloneTree(false);
-            AstNodeExpr* const bitp = nodep->bitp()->unlinkFrBack(&handle);
+            AstNodeExpr* bitp = nodep->bitp()->unlinkFrBack(&handle);
             if (m_structSel) {
-                // Fixed-size class/struct arrays register one named solver
-                // symbol per declared index (record_struct_arr() in
-                // verilated_random.h), not a real SMT array, so an index
-                // that V3Width narrowed to the array's index width can wrap
-                // outside the declared range (e.g. items[i-1] at i==0
-                // becomes items[7] on a 7-element array) and reference a
-                // symbol the solver never declared, aborting the whole
-                // randomize() call. Guard it the same way the queue/
-                // dynamic-array bound check below does: zero-extend to at
-                // least 32 bits first (so the sign bit of the extended
-                // value is always 0), then use the same signed GteS/LtS
-                // comparison pair as that precedent -- equivalent to an
-                // unsigned bound check here, but consistent in style with
-                // the existing code.
                 AstUnpackArrayDType* const arrDtypep
                     = VN_CAST(nodep->fromp()->dtypep()->skipRefp(), UnpackArrayDType);
                 UASSERT_OBJ(arrDtypep, nodep, "AstArraySel of non-array type in constraint");
-                AstNodeExpr* idxCmpp = bitp->cloneTreePure(false);
-                if (idxCmpp->width() < 32) {
-                    AstExtend* const extendp = new AstExtend{fl, idxCmpp, 32};
-                    extendp->dtypeSetLogicSized(32, VSigning::UNSIGNED);
-                    idxCmpp = extendp;
+                const uint32_t size = arrDtypep->elementsConst();
+                // Bits needed to represent size as signed value
+                const int32_t sizeNeededBits = V3Number::log2b(size) + 2;
+                AstNodeExpr* indexCmpp = bitp->cloneTreePure(false);
+                // Make sure array size is representable in index's bitwidth
+                if (indexCmpp->width() < sizeNeededBits) {
+                    indexCmpp = new AstExtend{fl, indexCmpp, sizeNeededBits};
                 }
-                // Size the bounds to idxCmpp's actual width (>= 32, e.g. a
-                // 64-bit index expression skips the extend above) rather
-                // than assuming 32, so every operand of GteS/LtS always
-                // matches widths.
                 AstNodeExpr* const condp = new AstLogAnd{
                     fl,
-                    new AstGteS{fl, idxCmpp->cloneTreePure(false),
-                                new AstConst{fl, AstConst::WidthedValue{}, idxCmpp->width(), 0}},
-                    new AstLtS{fl, idxCmpp,
-                               new AstConst{fl, AstConst::WidthedValue{}, idxCmpp->width(),
-                                            static_cast<uint32_t>(arrDtypep->elementsConst())}}};
+                    new AstGteS{fl, indexCmpp->cloneTreePure(true),
+                                new AstConst{fl, AstConst::WidthedValue{}, indexCmpp->width(), 0}},
+                    new AstLtS{
+                        fl, indexCmpp,
+                        new AstConst{fl, AstConst::WidthedValue{}, indexCmpp->width(), size}}};
                 m_conditionp = m_conditionp ? new AstLogAnd{fl, m_conditionp, condp} : condp;
             }
             AstNodeExpr* const indexp = new AstSFormatF{fl, "#x%8x", false, bitp};
