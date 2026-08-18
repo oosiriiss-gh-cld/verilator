@@ -4127,7 +4127,11 @@ public:
     void dump(std::ostream& str) const override;
     void dumpJson(std::ostream& str) const override;
     void numberOperate(V3Number& out, const V3Number& from, const V3Number& bit) override {
-        out.opSel(from, bit.toUInt() + widthConst() - 1, bit.toUInt());
+        // 'bit' (the lsb) may be a signed value (e.g. a negative computed lsb from a
+        // variable +:/-: select), so sign-extend via toSInt() rather than toUInt().
+        const int32_t lsb = bit.toSInt();
+        out.opSel(from, static_cast<uint32_t>(lsb + widthConst() - 1),
+                  static_cast<uint32_t>(lsb));
     }
     string emitVerilog() override { V3ERROR_NA_RETURN(""); }
     string emitC() override {
