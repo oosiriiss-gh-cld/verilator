@@ -2157,9 +2157,13 @@ class ConstraintExprVisitor final : public VNVisitor {
                     extendp->dtypeSetLogicSized(32, VSigning::UNSIGNED);
                     idxCmpp = extendp;
                 }
+                // Size the bound to idxCmpp's actual width (>= 32, e.g. a
+                // 64-bit index expression skips the extend above) rather
+                // than assuming 32, so the two operands of AstLt always
+                // match widths.
                 AstNodeExpr* const condp = new AstLt{
                     fl, idxCmpp,
-                    new AstConst{fl, AstConst::WidthedValue{}, 32,
+                    new AstConst{fl, AstConst::WidthedValue{}, idxCmpp->width(),
                                  static_cast<uint32_t>(arrDtypep->elementsConst())}};
                 m_conditionp = m_conditionp ? new AstLogAnd{fl, m_conditionp, condp} : condp;
             }
