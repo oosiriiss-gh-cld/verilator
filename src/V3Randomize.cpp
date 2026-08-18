@@ -2143,11 +2143,12 @@ class ConstraintExprVisitor final : public VNVisitor {
                 // becomes items[7] on a 7-element array) and reference a
                 // symbol the solver never declared, aborting the whole
                 // randomize() call. Guard it the same way the queue/
-                // dynamic-array bound check below does: compare the raw
-                // index bits zero-extended and unsigned, so a signed
-                // reinterpretation of the narrow width or an array size
-                // that doesn't itself fit the index width (e.g. a
-                // power-of-two size) can't misjudge the bound.
+                // dynamic-array bound check below does: zero-extend to at
+                // least 32 bits first (so the sign bit of the extended
+                // value is always 0), then use the same signed GteS/LtS
+                // comparison pair as that precedent -- equivalent to an
+                // unsigned bound check here, but consistent in style with
+                // the existing code.
                 AstUnpackArrayDType* const arrDtypep
                     = VN_CAST(nodep->fromp()->dtypep()->skipRefp(), UnpackArrayDType);
                 UASSERT_OBJ(arrDtypep, nodep, "AstArraySel of non-array type in constraint");
@@ -2157,14 +2158,17 @@ class ConstraintExprVisitor final : public VNVisitor {
                     extendp->dtypeSetLogicSized(32, VSigning::UNSIGNED);
                     idxCmpp = extendp;
                 }
-                // Size the bound to idxCmpp's actual width (>= 32, e.g. a
+                // Size the bounds to idxCmpp's actual width (>= 32, e.g. a
                 // 64-bit index expression skips the extend above) rather
-                // than assuming 32, so the two operands of AstLt always
-                // match widths.
-                AstNodeExpr* const condp = new AstLt{
-                    fl, idxCmpp,
-                    new AstConst{fl, AstConst::WidthedValue{}, idxCmpp->width(),
-                                 static_cast<uint32_t>(arrDtypep->elementsConst())}};
+                // than assuming 32, so every operand of GteS/LtS always
+                // matches widths.
+                AstNodeExpr* const condp = new AstLogAnd{
+                    fl,
+                    new AstGteS{fl, idxCmpp->cloneTreePure(false),
+                                new AstConst{fl, AstConst::WidthedValue{}, idxCmpp->width(), 0}},
+                    new AstLtS{fl, idxCmpp,
+                               new AstConst{fl, AstConst::WidthedValue{}, idxCmpp->width(),
+                                            static_cast<uint32_t>(arrDtypep->elementsConst())}}};
                 m_conditionp = m_conditionp ? new AstLogAnd{fl, m_conditionp, condp} : condp;
             }
             AstNodeExpr* const indexp = new AstSFormatF{fl, "#x%8x", false, bitp};
