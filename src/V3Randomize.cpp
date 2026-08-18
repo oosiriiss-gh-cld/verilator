@@ -2133,8 +2133,37 @@ class ConstraintExprVisitor final : public VNVisitor {
             // Index is constant or non-rand -- format as hex literal.
             // Keep a pre-edit clone for the rand_mode hoist below.
             AstNodeExpr* const origp = nodep->cloneTree(false);
-            AstNodeExpr* const indexp
-                = new AstSFormatF{fl, "#x%8x", false, nodep->bitp()->unlinkFrBack(&handle)};
+            AstNodeExpr* const bitp = nodep->bitp()->unlinkFrBack(&handle);
+            if (m_structSel) {
+                // Fixed-size class/struct arrays register one named solver
+                // symbol per declared index (record_struct_arr() in
+                // verilated_random.h), not a real SMT array, so an index
+                // that V3Width narrowed to the array's index width can wrap
+                // outside the declared range (e.g. items[i-1] at i==0
+                // becomes items[7] on a 7-element array) and reference a
+                // symbol the solver never declared, aborting the whole
+                // randomize() call. Guard it the same way the queue/
+                // dynamic-array bound check below does: compare the raw
+                // index bits zero-extended and unsigned, so a signed
+                // reinterpretation of the narrow width or an array size
+                // that doesn't itself fit the index width (e.g. a
+                // power-of-two size) can't misjudge the bound.
+                AstUnpackArrayDType* const arrDtypep
+                    = VN_CAST(nodep->fromp()->dtypep()->skipRefp(), UnpackArrayDType);
+                UASSERT_OBJ(arrDtypep, nodep, "AstArraySel of non-array type in constraint");
+                AstNodeExpr* idxCmpp = bitp->cloneTreePure(false);
+                if (idxCmpp->width() < 32) {
+                    AstExtend* const extendp = new AstExtend{fl, idxCmpp, 32};
+                    extendp->dtypeSetLogicSized(32, VSigning::UNSIGNED);
+                    idxCmpp = extendp;
+                }
+                AstNodeExpr* const condp = new AstLt{
+                    fl, idxCmpp,
+                    new AstConst{fl, AstConst::WidthedValue{}, 32,
+                                 static_cast<uint32_t>(arrDtypep->elementsConst())}};
+                m_conditionp = m_conditionp ? new AstLogAnd{fl, m_conditionp, condp} : condp;
+            }
+            AstNodeExpr* const indexp = new AstSFormatF{fl, "#x%8x", false, bitp};
             handle.relink(indexp);
             AstSFormatF* const newp = editSMT(nodep, nodep->fromp(), indexp);
             if (!newp || !hoistRandModeOverSelect(newp, origp)) {
@@ -2860,7 +2889,17 @@ class ConstraintExprVisitor final : public VNVisitor {
 
                 cstmtp->add("ret = \"(" + std::string(smtOp) + " \" + ret + \" \";\n");
                 cstmtp->add("ret += ");
-                cstmtp->add(iterateSubtreeReturnEdits(perElemExprp));
+                {
+                    // perElemExprp's own loop variable (loopVarp) is out of
+                    // scope once this reduction's internal loop completes,
+                    // so any bounds condition accumulated while building it
+                    // (e.g. an in-range check on a class-array element read)
+                    // must not survive to be attached by an enclosing
+                    // operator to code that runs after the loop.
+                    VL_RESTORER(m_conditionp);
+                    m_conditionp = nullptr;
+                    cstmtp->add(iterateSubtreeReturnEdits(perElemExprp));
+                }
                 cstmtp->add(";\n");
                 cstmtp->add("ret += \")\";\n");
             } else {
