@@ -1009,9 +1009,19 @@ class ConstraintExprVisitor final : public VNVisitor {
                               const int width) {
         if (condp) {
             FileLine* const flp = exprp->fileline();
-            return new AstCond{
+            AstCond* const newp = new AstCond{
                 flp, condp, exprp,
                 getConstFormat(new AstConst{flp, AstConst::WidthedValue{}, width, 0})};
+            // Mark as already lowered/result-dependent so that if this AstCond is ever
+            // independently (re-)visited -- e.g. as the direct thenp/elsep/condp operand
+            // of an outer editSMT() call, as happens when a bare guarded statement becomes
+            // a single-item AstConstraintIf then-body -- visit(AstCond)'s editFormat() call
+            // does not mistake it for a plain computable expression and try to evaluate the
+            // whole (cond ? expr : 0) as a real runtime value (corrupting exprp's already-
+            // lowered SMT-text placeholder). Without this, visit(AstCond) falls through to
+            // the correct "don't burden the solver" / "(ite ...)" handling only by luck.
+            newp->user1(true);
+            return newp;
         }
         return exprp;
     }
@@ -2621,6 +2631,11 @@ class ConstraintExprVisitor final : public VNVisitor {
         // used directly as the whole constraint (as in `foreach (a[i]) a[i].f;`)
         // has no such consumer, so apply it here -- otherwise the guard node is
         // simply discarded (leaked, and never actually enforced).
+        // Width must be captured before iterateChildren() lowers the expression
+        // into its SMT-text placeholder, whose own "width" is meaningless (e.g.
+        // the byte-length of the generated text), matching how editSMT() reads
+        // lhsp/rhsp/thsp width before calling iterateSubtreeReturnEdits() on them.
+        const int exprWidth = nodep->exprp()->width();
         AstNodeExpr* condp = nullptr;
         {
             VL_RESTORER(m_conditionp);
@@ -2630,7 +2645,7 @@ class ConstraintExprVisitor final : public VNVisitor {
         }
         if (condp) {
             AstNodeExpr* const exprp = nodep->exprp()->unlinkFrBack();
-            nodep->exprp(wrapWithCond(exprp, condp, exprp->width()));
+            nodep->exprp(wrapWithCond(exprp, condp, exprWidth));
         }
         if (m_wantSingle) {
             nodep->replaceWith(nodep->exprp()->unlinkFrBack());
