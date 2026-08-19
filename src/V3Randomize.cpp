@@ -40,6 +40,7 @@
 #include "V3FileLine.h"
 #include "V3Global.h"
 #include "V3MemberMap.h"
+#include "V3Number.h"
 #include "V3Task.h"
 #include "V3UniqueNames.h"
 
@@ -759,6 +760,10 @@ class ConstraintExprVisitor final : public VNVisitor {
     // AstVar::user3() -> bool. Handled in constraints
     // AstNodeExpr::user1()    -> bool. Depending on a randomized variable
     // AstMemberSel::user2p()  -> AstNodeModule*. Pointer to containing module
+    // AstArraySel::user2()    -> bool. Index is a loop variable that V3Randomize itself
+    //                            generated to range over exactly this array (e.g. array
+    //                            reduction/inside methods), so it is provably always
+    //                            in-bounds and needs no bounds guard.
     // VNuser3InUse m_inuser3; (Allocated for use in RandomizeVisitor)
 
     AstClass* const m_classp;
@@ -1008,9 +1013,11 @@ class ConstraintExprVisitor final : public VNVisitor {
                               const int width) {
         if (condp) {
             FileLine* const flp = exprp->fileline();
-            return new AstCond{
+            AstCond* condWrapperp = new AstCond{
                 flp, condp, exprp,
                 getConstFormat(new AstConst{flp, AstConst::WidthedValue{}, width, 0})};
+            condWrapperp->user1(true);
+            return condWrapperp;
         }
         return exprp;
     }
@@ -1086,7 +1093,11 @@ class ConstraintExprVisitor final : public VNVisitor {
         AstSFormatF* const newp = new AstSFormatF{nodep->fileline(), smtExpr, false, argsp};
         if (m_structSel && newp->name() == "(select %s %s)") {
             newp->name("%s.%s");
-            if (!VN_IS(nodep, AssocSel)) newp->exprsp()->nextp()->name("%x");
+            // Match the declaration side (VL_SNPRINTF's C-style unpadded "%x" -- see
+            // isUnpackedClassRefArray in V3Randomize): plain "%x" here instead follows
+            // Verilog $display semantics and zero-pads to the index's declared bit width,
+            // so use "%0x" for minimum-width output.
+            if (!VN_IS(nodep, AssocSel)) newp->exprsp()->nextp()->name("%0x");
         }
         nodep->replaceWith(newp);
         VL_DO_DANGLING(pushDeletep(nodep), nodep);
@@ -2133,8 +2144,34 @@ class ConstraintExprVisitor final : public VNVisitor {
             // Index is constant or non-rand -- format as hex literal.
             // Keep a pre-edit clone for the rand_mode hoist below.
             AstNodeExpr* const origp = nodep->cloneTree(false);
-            AstNodeExpr* const indexp
-                = new AstSFormatF{fl, "#x%8x", false, nodep->bitp()->unlinkFrBack(&handle)};
+            AstNodeExpr* bitp = nodep->bitp()->unlinkFrBack(&handle);
+            if (m_structSel && !nodep->user2()) {
+                // Skip when nodep->user2() is set: the index is a loop variable
+                // V3Randomize generated to range over exactly this array (see
+                // newSel() callers), so it is always in-bounds and any guard here
+                // would wrongly gate the *whole* enclosing expression on the loop
+                // variable's post-loop value rather than each iteration's value.
+                AstUnpackArrayDType* const arrDtypep
+                    = VN_CAST(nodep->fromp()->dtypep()->skipRefp(), UnpackArrayDType);
+                UASSERT_OBJ(arrDtypep, nodep, "AstArraySel of non-array type in constraint");
+                const uint32_t size = arrDtypep->elementsConst();
+                // Bits needed to represent size as signed value
+                const int32_t sizeNeededBits = V3Number::log2b(size) + 2;
+                AstNodeExpr* indexCmpp = bitp->cloneTreePure(false);
+                // Make sure array's size is representable in index's bitwidth
+                if (indexCmpp->width() < sizeNeededBits) {
+                    indexCmpp = new AstExtend{fl, indexCmpp, sizeNeededBits};
+                }
+                AstNodeExpr* const condp = new AstLogAnd{
+                    fl,
+                    new AstGteS{fl, indexCmpp->cloneTreePure(true),
+                                new AstConst{fl, AstConst::WidthedValue{}, indexCmpp->width(), 0}},
+                    new AstLtS{
+                        fl, indexCmpp,
+                        new AstConst{fl, AstConst::WidthedValue{}, indexCmpp->width(), size}}};
+                m_conditionp = m_conditionp ? new AstLogAnd{fl, m_conditionp, condp} : condp;
+            }
+            AstNodeExpr* const indexp = new AstSFormatF{fl, "#x%8x", false, bitp};
             handle.relink(indexp);
             AstSFormatF* const newp = editSMT(nodep, nodep->fromp(), indexp);
             if (!newp || !hoistRandModeOverSelect(newp, origp)) {
@@ -2591,7 +2628,16 @@ class ConstraintExprVisitor final : public VNVisitor {
                 nodep->exprp(neqp);
             }
         }
-        iterateChildren(nodep);
+        {
+            const int32_t exprWidth = nodep->exprp()->width();
+            VL_RESTORER(m_conditionp);
+            m_conditionp = nullptr;
+            iterateChildren(nodep);
+            if (m_conditionp) {
+                AstNodeExpr* const exprp = nodep->exprp()->unlinkFrBack();
+                nodep->exprp(wrapWithCond(exprp, m_conditionp, exprWidth));
+            }
+        }
         if (m_wantSingle) {
             nodep->replaceWith(nodep->exprp()->unlinkFrBack());
             VL_DO_DANGLING(nodep->deleteTree(), nodep);
@@ -2683,6 +2729,7 @@ class ConstraintExprVisitor final : public VNVisitor {
                 = new AstForeachHeader{fl, nodep->fromp()->cloneTreePure(false), newVarp};
             AstNodeExpr* const selp = newSel(nodep->fileline(), nodep->fromp(), idxRefp);
             selp->user1(randArr);
+            selp->user2(true);  // idxRefp ranges over exactly this array; always in-bounds
             AstNode* const itemp = new AstEq{fl, selp, nodep->pinsp()->unlinkFrBack()};
             itemp->user1(true);
 
@@ -2814,6 +2861,7 @@ class ConstraintExprVisitor final : public VNVisitor {
                 AstNodeExpr* const idxRefp = new AstVarRef{fl, loopVarp, VAccess::READ};
                 AstNodeExpr* const elemSelp = newSel(fl, nodep->fromp(), idxRefp);
                 elemSelp->user1(randArr);
+                elemSelp->user2(true);  // idxRefp ranges over exactly this array; always in-bounds
 
                 // Get the result width for the reduction
                 const int resultWidth = nodep->dtypep()->width();
