@@ -40,6 +40,7 @@
 #include "V3FileLine.h"
 #include "V3Global.h"
 #include "V3MemberMap.h"
+#include "V3Number.h"
 #include "V3Task.h"
 #include "V3UniqueNames.h"
 
@@ -2133,8 +2134,30 @@ class ConstraintExprVisitor final : public VNVisitor {
             // Index is constant or non-rand -- format as hex literal.
             // Keep a pre-edit clone for the rand_mode hoist below.
             AstNodeExpr* const origp = nodep->cloneTree(false);
-            AstNodeExpr* const indexp
-                = new AstSFormatF{fl, "#x%8x", false, nodep->bitp()->unlinkFrBack(&handle)};
+            AstNodeExpr* bitp = nodep->bitp()->unlinkFrBack(&handle);
+            if (m_structSel) {
+                AstUnpackArrayDType* const arrDtypep
+                    = VN_CAST(nodep->fromp()->dtypep()->skipRefp(), UnpackArrayDType);
+                UASSERT_OBJ(arrDtypep, nodep, "AstArraySel of non-array type in constraint");
+                const uint32_t size = arrDtypep->elementsConst();
+                // Bits needed to represent size as signed value
+                const int32_t sizeNeededBits = V3Number::log2b(size) + 2;
+                AstNodeExpr* indexCmpp = bitp->cloneTreePure(false);
+                // Make sure array size is representable in index's bitwidth
+                UASSERT_OBJ(indexCmpp->width() < sizeNeededBits, indexCmpp,
+                            "AstArraySel index should be truncated to minimum width required to "
+                            "address all elements");
+                indexCmpp = new AstExtend{fl, indexCmpp, sizeNeededBits};
+                AstNodeExpr* const condp = new AstLogAnd{
+                    fl,
+                    new AstGteS{fl, indexCmpp->cloneTreePure(true),
+                                new AstConst{fl, AstConst::WidthedValue{}, indexCmpp->width(), 0}},
+                    new AstLtS{
+                        fl, indexCmpp,
+                        new AstConst{fl, AstConst::WidthedValue{}, indexCmpp->width(), size}}};
+                m_conditionp = m_conditionp ? new AstLogAnd{fl, m_conditionp, condp} : condp;
+            }
+            AstNodeExpr* const indexp = new AstSFormatF{fl, "#x%8x", false, bitp};
             handle.relink(indexp);
             AstSFormatF* const newp = editSMT(nodep, nodep->fromp(), indexp);
             if (!newp || !hoistRandModeOverSelect(newp, origp)) {
@@ -2591,7 +2614,24 @@ class ConstraintExprVisitor final : public VNVisitor {
                 nodep->exprp(neqp);
             }
         }
-        iterateChildren(nodep);
+        // Capture any array-bounds guard condition (e.g. from an out-of-range
+        // foreach index into a class-handle array) built while processing this
+        // statement's expression. Binary operators consume such a condition
+        // themselves via editSMT()'s lhsp/rhsp handling, but a bare expression
+        // used directly as the whole constraint (as in `foreach (a[i]) a[i].f;`)
+        // has no such consumer, so apply it here -- otherwise the guard node is
+        // simply discarded (leaked, and never actually enforced).
+        AstNodeExpr* condp = nullptr;
+        {
+            VL_RESTORER(m_conditionp);
+            m_conditionp = nullptr;
+            iterateChildren(nodep);
+            condp = m_conditionp;
+        }
+        if (condp) {
+            AstNodeExpr* const exprp = nodep->exprp()->unlinkFrBack();
+            nodep->exprp(wrapWithCond(exprp, condp, exprp->width()));
+        }
         if (m_wantSingle) {
             nodep->replaceWith(nodep->exprp()->unlinkFrBack());
             VL_DO_DANGLING(nodep->deleteTree(), nodep);
