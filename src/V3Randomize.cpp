@@ -1997,31 +1997,6 @@ class ConstraintExprVisitor final : public VNVisitor {
         // Fall back to "(ite cond then else)"
         visit(static_cast<AstNodeTriop*>(nodep));
     }
-    void visit(AstLogIf* nodep) override {
-        if (editFormat(nodep)) return;
-        if (!nodep->lhsp()->user1()) {
-            // Mirrors visit(AstCond*): cond is computable (e.g. a foreach loop index
-            // compare), so rewrite "cond -> then" as "cond ? then : true" over strings
-            // instead of burdening the solver with an SMT implication. This also lets
-            // any m_conditionp set while formatting "then" (e.g. an array-bounds guard
-            // from an OOB-safe struct-array select) escape this node undisturbed,
-            // rather than being captured and locally wrapped by editSMT's operand
-            // isolation, same as the untouched cond branch of AstCond above.
-            iterate(nodep->rhsp());
-            UASSERT_OBJ(nodep->rhsp()->isString(), nodep,
-                        "LogIf rhs in constraint not converted to string");
-            FileLine* const fl = nodep->fileline();
-            AstCond* const newp = new AstCond{
-                fl, nodep->lhsp()->unlinkFrBack(), nodep->rhsp()->unlinkFrBack(),
-                getConstFormat(new AstConst{fl, AstConst::WidthedValue{}, 1, 1})};
-            newp->dtypeSetString();
-            nodep->replaceWith(newp);
-            VL_DO_DANGLING(nodep->deleteTree(), nodep);
-            return;
-        }
-        // Fall back to the generic Biop path: "(bvor (bvnot cond) then)" via emitSMT()
-        visit(static_cast<AstNodeBiop*>(nodep));
-    }
     void visit(AstReplicate* nodep) override {
         // Biop, but RHS is harmful
         if (editFormat(nodep)) return;
