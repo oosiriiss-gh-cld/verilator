@@ -6048,20 +6048,52 @@ class LinkDotResolveVisitor final : public VNVisitor {
         LINKDOT_VISIT_START();
         UINFO(5, indent() << "visit " << nodep);
         if (AstNode* const cpackagep = nodep->classOrPackageOpp()) {
-            if (AstClassOrPackageRef* const cpackagerefp = VN_CAST(cpackagep, ClassOrPackageRef)) {
+            // A qualified type such as "my_pkg::custom_type_defs::packet_t" parses into
+            // a left-associative chain of colon Dots (see packageClassScopeList in
+            // verilog.y), one AstClassOrPackageRef per '::' segment before the final
+            // type name - the same shape visit(AstDot*) above already walks for
+            // expressions such as "pkg::cls::CONST". Flatten it and resolve every
+            // segment but the last, each inside the scope of the one before it, so the
+            // logic below always ends up with a single, correctly-scoped
+            // AstClassOrPackageRef - regardless of how many '::' were written.
+            std::vector<AstClassOrPackageRef*> segsp;
+            for (AstNode* walkp = cpackagep; walkp;) {
+                if (AstDot* const dotp = VN_CAST(walkp, Dot)) {
+                    UASSERT_OBJ(dotp->colon(), dotp, "Non-colon dot in type scope qualifier");
+                    segsp.push_back(VN_AS(dotp->rhsp(), ClassOrPackageRef));
+                    walkp = dotp->lhsp();
+                } else {
+                    segsp.push_back(VN_AS(walkp, ClassOrPackageRef));
+                    walkp = nullptr;
+                }
+            }
+            std::reverse(segsp.begin(), segsp.end());
+
+            VL_RESTORER_COPY(m_ds);
+            for (size_t i = 0; i + 1 < segsp.size(); ++i) {
+                if (!m_statep->resolveClassOrPackage(m_ds.m_dotSymp, segsp[i], i == 0, false,
+                                                     "class/package reference")) {
+                    return;  // Error already reported
+                }
+                m_ds.m_dotSymp = m_statep->getNodeSym(segsp[i]->classOrPackageSkipp());
+                m_ds.m_dotPos = DP_PACKAGE;
+            }
+
+            AstClassOrPackageRef* const cpackagerefp = segsp.back();
+            {
                 iterate(cpackagerefp);
                 const AstClass* const clsp = VN_CAST(cpackagerefp->classOrPackageNodep(), Class);
                 if (clsp && clsp->hasGParam()) {
                     // Unable to link before the instantiation of parameter classes.
                     // The class reference node still has to be visited now to later link
                     // parameters.
-                    iterate(cpackagep);
+                    iterate(cpackagerefp);
                     return;
                 }
                 // Defer non-typedef references through typedef aliases of parameterized classes.
                 if (m_statep->forPrimary() && !VN_IS(nodep->backp(), Typedef)
                     && isParamedClassRef(cpackagerefp)) {
-                    iterate(cpackagep);
+                    iterate(cpackagerefp);
                     return;
                 }
 
@@ -6077,7 +6109,7 @@ class LinkDotResolveVisitor final : public VNVisitor {
                     if (m_statep->forPrimary()) {
                         // It may be a type that comes from parameter class that is not
                         // instantioned yet
-                        iterate(cpackagep);
+                        iterate(cpackagerefp);
                         return;
                     }
                     // Likely impossible, as error thrown earlier
@@ -6088,9 +6120,6 @@ class LinkDotResolveVisitor final : public VNVisitor {
                         << "'\n"
                         << cpackagerefp->warnMore() + "... Suggest '.' instead of '::'");
                 }
-            } else {
-                cpackagep->v3warn(E_UNSUPPORTED,
-                                  "Unsupported: Multiple '::' package/class reference");
             }
             VL_DO_DANGLING(pushDeletep(cpackagep->unlinkFrBack()), cpackagep);
         }
