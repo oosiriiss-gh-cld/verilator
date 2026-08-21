@@ -223,6 +223,8 @@ class WidthVisitor final : public VNVisitor {
     // STATE
     V3UniqueNames m_insideTempNames;  // For generating unique temporary variable names for
                                       // `inside` expressions
+    V3UniqueNames m_selLoPadNames;  // For generating unique write-sink variable names used to
+                                    // pad an out-of-range-low constant Sel used as an lvalue
     VMemberMap m_memberMap;  // Member names cached for fast lookup
     V3TaskConnectState m_taskConnectState;  // State to cache V3Task::taskConnects
     WidthVP* m_vup = nullptr;  // Current node state
@@ -1147,6 +1149,66 @@ class WidthVisitor final : public VNVisitor {
                 nodep->widthConst(width);
                 pushDeletep(nodep->lsbp());
                 nodep->lsbp()->replaceWith(new AstConst{nodep->lsbp()->fileline(), 0});
+            }
+            // A constant select whose lsb is below the vector's own bit 0 (e.g. x[2:-2] on a
+            // [5:0] vector) cannot be represented at runtime: VL_SEL_*/VL_ASSIGNSEL_* compute
+            // "value >> lsb"/"mask << lsb", and a negative shift is undefined behavior in C++.
+            // Rewrite the select at compile time so any lsb reaching codegen is non-negative:
+            // the in-range portion (if any) becomes an ordinary Sel starting at bit 0, and the
+            // out-of-range low bits are concatenated on as padding -- zero for a read, or a
+            // fresh write-only variable for a write (which V3Const's generic Concat-as-lvalue
+            // splitting then slices the RHS into, and which later dead-code elimination drops).
+            // A select that is *also* out of range on the high side is left to the existing
+            // high-side handling below (or, for a write, to the runtime's natural masking).
+            if (VN_IS(nodep->lsbp(), Const) && nodep->lsbConst() < 0 && !m_doGenerate
+                && !inParameterizedTemplate) {
+                const int fromWidth = nodep->fromp()->width();
+                const int lsb = nodep->lsbConst();
+                const int msb = lsb + width - 1;
+                const bool alsoHighOob = msb > fromWidth - 1;
+                const int validWidth = alsoHighOob ? 0 : std::max(0, msb + 1);
+                const bool skip = alsoHighOob || (validWidth == 0 && !nodep->fromp()->isPure());
+                if (!skip) {
+                    const int lowPadWidth = width - validWidth;
+                    const VSigning numeric = nodep->fromp()->dtypep()->numeric();
+                    AstNodeExpr* const fromp = nodep->fromp()->unlinkFrBack();
+                    AstNodeExpr* lowp;
+                    if (isWriteSelect) {
+                        AstVar* const varp = new AstVar{
+                            nodep->fileline(), VVarType::BLOCKTEMP, m_selLoPadNames.get(nodep),
+                            nodep->findLogicDType(lowPadWidth, lowPadWidth, numeric)};
+                        // Write-only by construction (drops the out-of-range bits); don't
+                        // warn that it's never read
+                        varp->fileline()->warnOff(V3ErrorCode::UNUSEDSIGNAL, true);
+                        if (m_ftaskp) {
+                            varp->funcLocal(true);
+                            varp->lifetime(VLifetime::AUTOMATIC_EXPLICIT);
+                            m_ftaskp->stmtsp()->addHereThisAsNext(varp);
+                        } else {
+                            m_modep->stmtsp()->addHereThisAsNext(varp);
+                        }
+                        lowp = new AstVarRef{nodep->fileline(), varp, VAccess::WRITE};
+                    } else {
+                        lowp = new AstConst{nodep->fileline(), AstConst::WidthedValue{},
+                                            lowPadWidth, 0};
+                    }
+                    AstNodeExpr* newp;
+                    if (validWidth > 0) {
+                        AstNodeExpr* const midp
+                            = new AstSel{nodep->fileline(), fromp, 0, validWidth};
+                        newp = new AstConcat{nodep->fileline(), midp, lowp};
+                    } else {
+                        // Entirely below the valid range; 'fromp' contributes no bits, and was
+                        // proven pure above, so it is safe to drop.
+                        VL_DO_DANGLING(pushDeletep(fromp), fromp);
+                        newp = lowp;
+                    }
+                    newp->dtypeFrom(nodep);
+                    nodep->replaceWith(newp);
+                    VL_DO_DANGLING(pushDeletep(nodep), nodep);
+                    userIterateSubtreeReturnEdits(newp, WidthVP{SELF, BOTH}.p());
+                    return;
+                }
             }
             // We're extracting, so just make sure the expression is at least wide enough.
             if (nodep->fromp()->width() < width && !inParameterizedTemplate) {
@@ -7964,6 +8026,7 @@ class WidthVisitor final : public VNVisitor {
     void visit(AstNodeModule* nodep) override {
         assertAtStatement(nodep);
         VL_RESTORER_COPY(m_insideTempNames);
+        VL_RESTORER_COPY(m_selLoPadNames);
         if (AstClass* const classp = VN_CAST(nodep, Class)) {
             visitClass(classp);
         } else {
@@ -10321,6 +10384,7 @@ public:
                  bool doGenerate)  // [in] TRUE if we are inside a generate statement and
         //                           // don't wish to trigger errors
         : m_insideTempNames{"__VInside"}
+        , m_selLoPadNames{"__VSelLoPad"}
         , m_paramsOnly{paramsOnly}
         , m_doGenerate{doGenerate} {}
     AstNode* mainAcceptEdit(AstNode* nodep) {
