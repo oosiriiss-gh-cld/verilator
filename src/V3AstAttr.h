@@ -1725,9 +1725,7 @@ public:
     int elements() const VL_MT_SAFE { return hi() - lo() + 1; }
     bool ranged() const { return m_ranged; }
     bool ascending() const { return m_left < m_right; }
-    int hiMaxSelect() const {
-        return (lo() < 0 ? hi() - lo() : hi());
-    }  // Maximum value a [] select may index
+    int hiMaxSelect() const { return hi() - lo(); }  // Maximum value a [] select may index
     void dump(std::ostream& str) const {
         if (ranged()) {
             str << "[" << left() << ":" << right() << "]";
