@@ -225,6 +225,10 @@ class WidthVisitor final : public VNVisitor {
                                       // `inside` expressions
     V3UniqueNames m_selLoPadNames;  // For generating unique write-sink variable names used to
                                     // pad an out-of-range-low constant Sel used as an lvalue
+    V3UniqueNames m_selLsbTempNames;  // For generating unique temporary variable names used to
+                                      // evaluate a non-constant Sel lsb expression exactly once
+    V3UniqueNames m_selFromTempNames;  // For generating unique temporary variable names used to
+                                       // evaluate a Sel's 'from' expression exactly once
     VMemberMap m_memberMap;  // Member names cached for fast lookup
     V3TaskConnectState m_taskConnectState;  // State to cache V3Task::taskConnects
     WidthVP* m_vup = nullptr;  // Current node state
@@ -1112,6 +1116,37 @@ class WidthVisitor final : public VNVisitor {
         }
     }
 
+    static std::vector<AstNodeExpr*> purifyExprN(AstNodeExpr* origp, int n, V3UniqueNames& names,
+                                                 AstNodeFTask* ftaskp, AstNodeModule* modep) {
+        // Return 'n' independently-usable AstNodeExpr*, each evaluating to the same value
+        // as 'origp' (which is consumed). If origp is pure, they are just 'n' cheap clones.
+        // If not, origp is evaluated exactly once -- the first result embeds that evaluation
+        // (storing it to a fresh temp var), and the rest are cheap reads of that temp -- so
+        // callers may freely use the value more than once without risking a side effect
+        // (e.g. a class method call) firing more than the one time the original code did.
+        std::vector<AstNodeExpr*> resultp;
+        resultp.reserve(n);
+        if (origp->isPure()) {
+            for (int i = 0; i < n; ++i) resultp.push_back(origp->cloneTreePure(false));
+            VL_DO_DANGLING(origp->deleteTree(), origp);
+            return resultp;
+        }
+        FileLine* const fl = origp->fileline();
+        AstVar* const varp = new AstVar{fl, VVarType::XTEMP, names.get(origp), origp->dtypep()};
+        if (ftaskp) {
+            varp->funcLocal(true);
+            varp->lifetime(VLifetime::AUTOMATIC_EXPLICIT);
+            ftaskp->stmtsp()->addHereThisAsNext(varp);
+        } else {
+            modep->stmtsp()->addHereThisAsNext(varp);
+        }
+        resultp.push_back(
+            new AstExprStmt{fl, new AstAssign{fl, new AstVarRef{fl, varp, VAccess::WRITE}, origp},
+                            new AstVarRef{fl, varp, VAccess::READ}});
+        for (int i = 1; i < n; ++i) resultp.push_back(new AstVarRef{fl, varp, VAccess::READ});
+        return resultp;
+    }
+
     void visit(AstSel* nodep) override {
         // Signed: always unsigned; Real: Not allowed
         // LSB is self-determined (IEEE 2012 11.5.1)
@@ -1209,6 +1244,110 @@ class WidthVisitor final : public VNVisitor {
                     userIterateSubtreeReturnEdits(newp, WidthVP{SELF, BOTH}.p());
                     return;
                 }
+            }
+            // A non-constant (runtime) lsb whose expression is signed could likewise evaluate
+            // negative (e.g. x[i.getSigned(-2)+:5]); unsigned lsb expressions can't produce a
+            // true negative value here (newSubLsbOf/newSubNeg preserve the *original*
+            // expression's signedness, so an unsigned index only ever wraps to a large
+            // unsigned value, which the existing out-of-range-high handling already deals
+            // with safely). We can't know at compile time how many bits (if any) are
+            // out-of-range-low, so we can't shape a Concat like the constant case above.
+            // Instead, guard with a runtime Cond that leaves lsb>=0 completely untouched
+            // (identical codegen to today), and only for lsb<0 do we shift 'fromp' so the
+            // missing low bits naturally read/write as zero -- reusing ordinary
+            // variable-shift codegen (already relied on throughout Verilator for runtime
+            // '<<'/'>>') instead of inventing new runtime primitives.
+            // width <= (1<<28) mirrors the same "over 1 billion bits" sanity bound used
+            // elsewhere in this file (e.g. replaceSelPlusMinus) -- deeply malformed selects
+            // (already reported via SELRANGE below) can reach here with an enormous width
+            // after error-recovery re-derives the select, and building Gte/Cond/Sel scaffolding
+            // sized to that width is needlessly slow and pointless once it's already an error.
+            if (!VN_IS(nodep->lsbp(), Const) && nodep->lsbp()->isSigned() && width <= (1 << 28)
+                && !m_doGenerate && !inParameterizedTemplate) {
+                FileLine* const selFl = nodep->fileline();
+                if (!isWriteSelect) {
+                    AstNodeExpr* const lsbOrigp = nodep->lsbp()->unlinkFrBack();
+                    AstNodeExpr* const fromOrigp = nodep->fromp()->unlinkFrBack();
+                    const std::vector<AstNodeExpr*> lsbs
+                        = purifyExprN(lsbOrigp, 3, m_selLsbTempNames, m_ftaskp, m_modep);
+                    const std::vector<AstNodeExpr*> froms
+                        = purifyExprN(fromOrigp, 2, m_selFromTempNames, m_ftaskp, m_modep);
+                    AstNodeExpr* const condp
+                        = new AstGte{selFl, lsbs[0], new AstConst{selFl, AstConst::Signed32{}, 0}};
+                    // Reinterpret as unsigned via a same-width Sel (whose own dtype is always
+                    // unsigned, per AstSel's constructor, regardless of its operand): known
+                    // non-negative here (guarded by condp), and critically this keeps the
+                    // rebuilt Sel's own lsbp() from looking 'isSigned()' when it is reprocessed
+                    // below, which would otherwise re-trigger this same transform on it
+                    // forever. (A plain dtype mutation on lsbs[1] doesn't stick -- VarRefs
+                    // always re-derive their dtype from the variable they reference.)
+                    AstNodeExpr* const lsbUnsignedp
+                        = new AstSel{selFl, lsbs[1], 0, lsbs[1]->width()};
+                    AstNodeExpr* const truep = new AstSel{selFl, froms[0], lsbUnsignedp, width};
+                    AstNodeExpr* const falsep = new AstSel{
+                        selFl, new AstShiftL{selFl, froms[1], new AstNegate{selFl, lsbs[2]}}, 0,
+                        width};
+                    AstNodeExpr* const newp = new AstCond{selFl, condp, truep, falsep};
+                    newp->dtypeFrom(nodep);
+                    nodep->replaceWith(newp);
+                    VL_DO_DANGLING(pushDeletep(nodep), nodep);
+                    userIterateSubtreeReturnEdits(newp, WidthVP{SELF, BOTH}.p());
+                    return;
+                } else if (AstNodeAssign* const assignp = VN_CAST(nodep->backp(), NodeAssign);
+                           assignp && assignp->lhsp() == nodep) {
+                    // Direct 'sel = rhs' (or '<=') assignment: keep this same Sel as the
+                    // lvalue (so it still composes if e.g. later split out of a Concat
+                    // lvalue), just clamp its lsb to 0 when negative, and correspondingly
+                    // patch the rhs so the result is as if we'd written fewer bits starting
+                    // at 0 -- preserving fromp's bits that a naive width-W write at lsb=0
+                    // would otherwise incorrectly clobber with shifted-in zeros.
+                    AstNodeExpr* const lsbOrigp = nodep->lsbp()->unlinkFrBack();
+                    const std::vector<AstNodeExpr*> lsbs
+                        = purifyExprN(lsbOrigp, 4, m_selLsbTempNames, m_ftaskp, m_modep);
+                    AstNodeExpr* const cond1p
+                        = new AstGte{selFl, lsbs[0], new AstConst{selFl, AstConst::Signed32{}, 0}};
+                    AstNodeExpr* const cond2p
+                        = new AstGte{selFl, lsbs[1], new AstConst{selFl, AstConst::Signed32{}, 0}};
+                    // Reinterpret as unsigned via a same-width Sel (whose own dtype is always
+                    // unsigned, per AstSel's constructor, regardless of its operand): known
+                    // non-negative here (guarded by cond1p), and critically this keeps nodep's
+                    // rebuilt lsbp() from looking 'isSigned()' when it is reprocessed below,
+                    // which would otherwise re-trigger this same transform on it forever. (A
+                    // plain dtype mutation on lsbs[2] doesn't stick -- VarRefs always re-derive
+                    // their dtype from the variable they reference.)
+                    AstNodeExpr* const lsbUnsignedp
+                        = new AstSel{selFl, lsbs[2], 0, lsbs[2]->width()};
+                    AstNodeExpr* const clampedLsbp = new AstCond{
+                        selFl, cond1p, lsbUnsignedp, new AstConst{selFl, AstConst::Signed32{}, 0}};
+                    AstNodeExpr* const shiftAmtp = new AstNegate{selFl, lsbs[3]};
+                    V3Number allOnesNum{nodep, width};
+                    allOnesNum.setAllBits1();
+                    AstNodeExpr* const notMaskp = new AstNot{
+                        selFl, new AstShiftL{selFl, new AstConst{selFl, allOnesNum}, shiftAmtp}};
+                    // Resize (extend or truncate) fromp's clone to exactly 'width' bits --
+                    // same as an ordinary Sel(fromp, 0, width) -- so it combines cleanly with
+                    // the width-bit mask/shift arithmetic above regardless of how fromp's own
+                    // declared width compares to the select's.
+                    AstNodeExpr* const fromAtWp
+                        = new AstSel{selFl, nodep->fromp()->cloneTree(false), 0, width};
+                    AstNodeExpr* const preservedp = new AstAnd{selFl, notMaskp, fromAtWp};
+                    AstNodeExpr* const origRhsp = assignp->rhsp()->unlinkFrBack();
+                    // Note: opposite direction from notMaskp's shift above -- fromp bit j comes
+                    // from rhs bit (j - lsb) = (j + shiftAmt), i.e. a *right* shift of rhs.
+                    AstNodeExpr* const shiftedRhsp = new AstShiftR{
+                        selFl, origRhsp->cloneTree(false), shiftAmtp->cloneTreePure(false)};
+                    AstNodeExpr* const rhsPrimep = new AstOr{selFl, preservedp, shiftedRhsp};
+                    AstNodeExpr* const newRhsp = new AstCond{selFl, cond2p, origRhsp, rhsPrimep};
+                    nodep->lsbp(clampedLsbp);
+                    assignp->rhsp(newRhsp);
+                    userIterateSubtreeReturnEdits(clampedLsbp, WidthVP{SELF, BOTH}.p());
+                    userIterateSubtreeReturnEdits(newRhsp, WidthVP{SELF, BOTH}.p());
+                    return;
+                }
+                // Else: a write-select that isn't a direct assignment lhs (e.g. nested in a
+                // Concat lvalue, or a ref/inout port connection) -- narrower than the cases
+                // above, and not exercised by any current test; leave unfixed rather than
+                // risk misplacing the runtime check.
             }
             // We're extracting, so just make sure the expression is at least wide enough.
             if (nodep->fromp()->width() < width && !inParameterizedTemplate) {
@@ -8027,6 +8166,8 @@ class WidthVisitor final : public VNVisitor {
         assertAtStatement(nodep);
         VL_RESTORER_COPY(m_insideTempNames);
         VL_RESTORER_COPY(m_selLoPadNames);
+        VL_RESTORER_COPY(m_selLsbTempNames);
+        VL_RESTORER_COPY(m_selFromTempNames);
         if (AstClass* const classp = VN_CAST(nodep, Class)) {
             visitClass(classp);
         } else {
@@ -10385,6 +10526,8 @@ public:
         //                           // don't wish to trigger errors
         : m_insideTempNames{"__VInside"}
         , m_selLoPadNames{"__VSelLoPad"}
+        , m_selLsbTempNames{"__VSelLsb"}
+        , m_selFromTempNames{"__VSelFrom"}
         , m_paramsOnly{paramsOnly}
         , m_doGenerate{doGenerate} {}
     AstNode* mainAcceptEdit(AstNode* nodep) {
