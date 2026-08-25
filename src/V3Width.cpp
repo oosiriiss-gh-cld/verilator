@@ -8231,6 +8231,25 @@ class WidthVisitor final : public VNVisitor {
         return dtypep->isAggregateType();
     }
 
+    // Unlike ==, assignment, ternary, etc., bitwise and arithmetic operators never accept
+    // an aggregate (e.g. unpacked array) operand, even when both sides have the same type.
+    // Reports an error and replaces nodep with a constant if either operand is an
+    // aggregate; returns true in that case so the caller can bail out of further widthing.
+    bool replaceOnAggregateOperand(AstNodeBiop* nodep) {
+        const bool lhsAggr = isAggregateType(nodep->lhsp());
+        const bool rhsAggr = isAggregateType(nodep->rhsp());
+        if (!lhsAggr && !rhsAggr) return false;
+        const AstNode* const badp = lhsAggr ? nodep->lhsp() : nodep->rhsp();
+        nodep->v3error(ucfirst(nodep->prettyOperatorName())
+                       << " expects a non-aggregate operand on the " << (lhsAggr ? "LHS" : "RHS")
+                       << ", but " << (lhsAggr ? "LHS" : "RHS") << "'s data type is "
+                       << badp->dtypep()->prettyDTypeNameQ() << ", an array/aggregate type.");
+        AstNode* const newp = new AstConst{nodep->fileline(), AstConst::BitFalse{}};
+        nodep->replaceWith(newp);
+        VL_DO_DANGLING(pushDeletep(nodep), nodep);
+        return true;
+    }
+
     void visit_cmp_eq_gt(AstNodeBiop* nodep, bool realok) {
         // CALLER: AstEq, AstGt, ..., AstLtS
         // Real allowed if and only if real_lhs set
@@ -8535,6 +8554,7 @@ class WidthVisitor final : public VNVisitor {
             // Determine expression widths only relying on what's in the subops
             userIterateAndNext(nodep->lhsp(), WidthVP{CONTEXT_DET, PRELIM}.p());
             userIterateAndNext(nodep->rhsp(), WidthVP{CONTEXT_DET, PRELIM}.p());
+            if (replaceOnAggregateOperand(nodep)) return;
             checkCvtUS(nodep->lhsp(), false);
             checkCvtUS(nodep->rhsp(), false);
             const int width = std::max(nodep->lhsp()->width(), nodep->rhsp()->width());
@@ -8570,6 +8590,7 @@ class WidthVisitor final : public VNVisitor {
             // Determine expression widths only relying on what's in the subops
             userIterateAndNext(nodep->lhsp(), WidthVP{CONTEXT_DET, PRELIM}.p());
             userIterateAndNext(nodep->rhsp(), WidthVP{CONTEXT_DET, PRELIM}.p());
+            if (replaceOnAggregateOperand(nodep)) return;
             if (!real_ok) {
                 checkCvtUS(nodep->lhsp(), false);
                 checkCvtUS(nodep->rhsp(), false);
