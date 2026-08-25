@@ -1,0 +1,10 @@
+%Error: t/t_lint_aggregate_bitop_bad.v:12:15: Operator AND expects a non-aggregate operand on the LHS, but LHS's data type is 'logic$[0:2]', an array/aggregate type.
+                                            : ... note: In instance 't'
+   12 |       y = arr & x;
+      |               ^
+        ... See the manual at https://verilator.org/verilator_doc.html?v=latest for more assistance.
+%Error: t/t_lint_aggregate_bitop_bad.v:13:15: Operator ADD expects a non-aggregate operand on the LHS, but LHS's data type is 'logic$[0:2]', an array/aggregate type.
+                                            : ... note: In instance 't'
+   13 |       z = arr + x;
+      |               ^
+%Error: Exiting due to
