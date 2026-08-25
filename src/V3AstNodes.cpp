@@ -2438,6 +2438,11 @@ void AstIfaceRefDType::dumpSmall(std::ostream& str) const {
     this->AstNodeDType::dumpSmall(str);
     str << "iface";
 }
+string AstIfaceRefDType::prettyDTypeName(bool) const {
+    string result = "interface "s + prettyName(ifaceName());
+    if (modportName() != "") result += "."s + prettyName(modportName());
+    return result;
+}
 void AstImplication::dump(std::ostream& str) const {
     this->AstNodeExpr::dump(str);
     if (isOverlapped()) str << " [overlapped]";

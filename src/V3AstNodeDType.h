@@ -933,6 +933,7 @@ public:
     void dump(std::ostream& str = std::cout) const override;
     void dumpJson(std::ostream& str = std::cout) const override;
     void dumpSmall(std::ostream& str) const override;
+    string prettyDTypeName(bool full) const override;
     AstBasicDType* basicp() const override VL_MT_STABLE { return nullptr; }
     bool similarDTypeNode(const AstNodeDType* samep) const override { return this == samep; }
     int widthAlignBytes() const override { return 0; }
