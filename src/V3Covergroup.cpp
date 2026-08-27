@@ -1239,10 +1239,21 @@ class FunctionalCoverageVisitor final : public VNVisitor {
     AstNodeExpr* buildTransitionItemCondition(AstCoverTransItem* itemp, AstNodeExpr* exprp) {
         AstNodeExpr* condp = nullptr;
 
-        for (AstNode* valp = itemp->valuesp(); valp; valp = valp->nextp()) {
+        for (AstNode* valp = itemp->valuesp(); valp;) {
             AstNodeExpr* singleCondp = nullptr;
 
-            AstConst* const constp = VN_AS(valp, Const);
+            // Values may be parameter/localparam references rather than literals; fold them
+            // to constants (as is done for value/range bins) before requiring an AstConst.
+            // constifyEdit may replace/delete 'valp' in place, so grab the next list node
+            // from the (possibly new) returned node rather than from the old 'valp'.
+            AstNodeExpr* const constifiedp = V3Const::constifyEdit(VN_AS(valp, NodeExpr));
+            AstConst* const constp = VN_CAST(constifiedp, Const);
+            if (!constp) {
+                itemp->v3error("Non-constant expression in covergroup transition bin; "
+                               "transition values must be constants");
+                valp = constifiedp->nextp();
+                continue;
+            }
             singleCondp
                 = new AstEq{constp->fileline(), exprp->cloneTree(false), constp->cloneTree(false)};
 
@@ -1251,6 +1262,7 @@ class FunctionalCoverageVisitor final : public VNVisitor {
             } else {
                 condp = singleCondp;
             }
+            valp = constifiedp->nextp();
         }
 
         return condp;
