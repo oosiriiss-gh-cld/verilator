@@ -200,6 +200,7 @@ class AssertDeFutureVisitor final : public VNVisitor {
             AstSenTree* const sentreep = m_futurep->sentreep();
             AstAlways* const alwaysp = new AstAlways{nodep->fileline(), VAlwaysKwd::ALWAYS,
                                                      sentreep->cloneTree(false), nullptr};
+            alwaysp->isBoundsCheck(true);  // $past/$sampled bookkeeping, not user logic
             m_modp->addStmtsp(alwaysp);
             outvarp = new AstVar{nodep->fileline(), VVarType::MODULETEMP,
                                  "__Vnotfuture" + cvtToStr(m_pastNum) + "_" + nodep->name(),
@@ -523,6 +524,7 @@ class AssertVisitor final : public VNVisitor {
             FileLine* const flp = exprp->fileline();
             // Create the always block that computes the delayed values
             alwayspr = new AstAlways{flp, VAlwaysKwd::ALWAYS, senTreep, nullptr};
+            alwayspr->isBoundsCheck(true);  // $past/$sampled bookkeeping, not user logic
             m_modp->addStmtsp(alwayspr);
             // Create the once-delayed variable
             const std::string name = "_Vpast_" + cvtToStr(m_modPastNum++) + "_1";
@@ -696,7 +698,11 @@ class AssertVisitor final : public VNVisitor {
         }
         // Add assertOn check last, for better combining
         if (!seqEvent) bodysp = newIfAssertOn(bodysp, nodep->directive(), nodep->userType());
-        if (sentreep) bodysp = new AstAlways{flp, VAlwaysKwd::ALWAYS, sentreep, bodysp};
+        if (sentreep) {
+            AstAlways* const alwaysp = new AstAlways{flp, VAlwaysKwd::ALWAYS, sentreep, bodysp};
+            alwaysp->isBoundsCheck(true);  // Assertion machinery, not user logic
+            bodysp = alwaysp;
+        }
 
         if (passsp && !passsp->backp()) VL_DO_DANGLING(pushDeletep(passsp), passsp);
         if (failsp && !failsp->backp()) VL_DO_DANGLING(pushDeletep(failsp), failsp);
@@ -1135,7 +1141,8 @@ class AssertVisitor final : public VNVisitor {
                 stmtsp};
             ifp->isBoundsCheck(true);  // To avoid LATCH warning
             ifp->branchPred(VBranchPred::BP_UNLIKELY);
-            AstNode* const newp = new AstAlways{fl, VAlwaysKwd::ALWAYS, monSenTree, ifp};
+            AstAlways* const newp = new AstAlways{fl, VAlwaysKwd::ALWAYS, monSenTree, ifp};
+            newp->isBoundsCheck(true);  // $monitor bookkeeping, not user logic
             m_modp->addStmtsp(newp);
         } else if (nodep->displayType() == VDisplayType::DT_STROBE) {
             nodep->displayType(VDisplayType::DT_DISPLAY);

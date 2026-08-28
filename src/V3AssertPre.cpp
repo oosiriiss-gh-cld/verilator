@@ -382,9 +382,11 @@ private:
                 AstSampled* const sampledp
                     = new AstSampled{flp, exprp->cloneTreePure(false), exprp->dtypep(), true};
                 AstAssign* const assignp = new AstAssign{flp, refp, sampledp};
-                m_clockingp->addNextHere(new AstAlways{
+                AstAlways* const alwaysp = new AstAlways{
                     flp, VAlwaysKwd::ALWAYS,
-                    new AstSenTree{flp, m_clockingp->sensesp()->cloneTree(false)}, assignp});
+                    new AstSenTree{flp, m_clockingp->sensesp()->cloneTree(false)}, assignp};
+                alwaysp->isBoundsCheck(true);  // Clocking-block bookkeeping, not user logic
+                m_clockingp->addNextHere(alwaysp);
             } else if (skewp->isZero()) {
                 // #0 means the var has to be sampled in Observed (IEEE 1800-2023 14.13)
                 AstAssign* const assignp = new AstAssign{flp, refp, exprp->cloneTreePure(false)};
@@ -406,8 +408,10 @@ private:
                     new AstTime{nodep->fileline(), m_modp->timeunit()}};
                 pushp->addPinsp(exprp->cloneTreePure(false));
                 pushp->dtypeSetVoid();
-                m_clockingp->addNextHere(
-                    new AstAlways{flp, VAlwaysKwd::ALWAYS, nullptr, pushp->makeStmt()});
+                AstAlways* const pushAlwaysp
+                    = new AstAlways{flp, VAlwaysKwd::ALWAYS, nullptr, pushp->makeStmt()};
+                pushAlwaysp->isBoundsCheck(true);  // Clocking-block bookkeeping, not user logic
+                m_clockingp->addNextHere(pushAlwaysp);
                 // Create a process like this:
                 //     always @<clocking event> queue.pop(<skew>, /*out*/<skewed var>);
                 AstCMethodHard* const popp = new AstCMethodHard{
@@ -416,10 +420,12 @@ private:
                 popp->addPinsp(skewp->unlinkFrBack());
                 popp->addPinsp(refp);
                 popp->dtypeSetVoid();
-                m_clockingp->addNextHere(
-                    new AstAlways{flp, VAlwaysKwd::ALWAYS,
-                                  new AstSenTree{flp, m_clockingp->sensesp()->cloneTree(false)},
-                                  popp->makeStmt()});
+                AstAlways* const popAlwaysp
+                    = new AstAlways{flp, VAlwaysKwd::ALWAYS,
+                                    new AstSenTree{flp, m_clockingp->sensesp()->cloneTree(false)},
+                                    popp->makeStmt()};
+                popAlwaysp->isBoundsCheck(true);  // Clocking-block bookkeeping, not user logic
+                m_clockingp->addNextHere(popAlwaysp);
             }
         } else {
             nodep->v3fatalSrc("Invalid direction");
@@ -773,6 +779,7 @@ private:
         AstIf* const ifp = new AstIf{flp, exprClonep, incrAssignp, resetAssignp};
         AstSenTree* const senTreep = newSenTree(nodep);
         AstAlways* const alwaysp = new AstAlways{flp, VAlwaysKwd::ALWAYS, senTreep, ifp};
+        alwaysp->isBoundsCheck(true);  // Sequence repetition bookkeeping, not user logic
         cntVarp->addNextHere(alwaysp);
         // Match: cnt >= N-1 (previous cycles via NBA) && expr (current cycle)
         AstNodeExpr* const cntCheckp = new AstGte{flp, new AstVarRef{flp, cntVarp, VAccess::READ},
@@ -1234,6 +1241,7 @@ private:
                 if (matchAssignsp) {
                     AstAlways* const alwaysp
                         = new AstAlways{flp, VAlwaysKwd::ALWAYS_COMB, nullptr, matchAssignsp};
+                    alwaysp->isBoundsCheck(true);  // Sequence match-item bookkeeping
                     m_modp->addStmtsp(alwaysp);
                 }
             } else {
@@ -1260,8 +1268,10 @@ private:
                 if (matchAssignsp) {
                     AstIf* const condp
                         = new AstIf{flp, antExprp->cloneTreePure(false), matchAssignsp};
+                    condp->isBoundsCheck(true);  // Sequence match-item bookkeeping
                     AstAlways* const alwaysp
                         = new AstAlways{flp, VAlwaysKwd::ALWAYS, newSenTree(nodep), condp};
+                    alwaysp->isBoundsCheck(true);  // Sequence match-item bookkeeping
                     m_modp->addStmtsp(alwaysp);
                 }
             }
@@ -1557,6 +1567,7 @@ private:
                                 new AstSenTree{flp, new AstSenItem{flp, VEdgeType::ET_POSEDGE,
                                                                    m_disablep->cloneTree(false)}},
                                 incrStmtp};
+            alwaysp->isBoundsCheck(true);  // disable iff bookkeeping, not user logic
             disableCntp->addNextHere(alwaysp);
 
             // Store value of that counter at the beginning of sequence evaluation
@@ -1576,6 +1587,7 @@ private:
             m_disableSeqIfp
                 = new AstIf{flp, new AstEq{flp, new AstVarRef{flp, initialCntp, VAccess::READ},
                                            readCntRefp->cloneTree(false)}};
+            m_disableSeqIfp->isBoundsCheck(true);  // disable iff bookkeeping, not user logic
             // Delete it, because it is always copied before insetion to the AST
             pushDeletep(m_disableSeqIfp);
         }

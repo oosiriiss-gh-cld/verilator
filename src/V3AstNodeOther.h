@@ -400,11 +400,13 @@ class AstNodeProcedure VL_NOT_FINAL : public AstNode {
     // @astgen op2 := stmtsp : List[AstNode] // Note: op1 is used in some sub-types only
     bool m_suspendable : 1;  // Is suspendable by a Delay, EventControl, etc.
     bool m_needProcess : 1;  // Uses VlProcess
+    bool m_isBoundsCheck : 1;  // True if this procedure is assertion-generated machinery
 protected:
     AstNodeProcedure(VNType t, FileLine* fl, AstNode* stmtsp)
         : AstNode{t, fl} {
         m_needProcess = false;
         m_suspendable = false;
+        m_isBoundsCheck = false;
         addStmtsp(stmtsp);
     }
 
@@ -418,6 +420,8 @@ public:
     void setSuspendable() { m_suspendable = true; }
     bool needProcess() const { return m_needProcess; }
     void setNeedProcess() { m_needProcess = true; }
+    void isBoundsCheck(bool flag) { m_isBoundsCheck = flag; }
+    bool isBoundsCheck() const { return m_isBoundsCheck; }
 };
 class AstNodeRange VL_NOT_FINAL : public AstNode {
     // A range, sized or unsized

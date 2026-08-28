@@ -507,7 +507,9 @@ class SvaNfaBuilder final {
         m_modp->addStmtsp(tempVarp);
         AstAssign* const assignp = new AstAssign{flp, new AstVarRef{flp, tempVarp, VAccess::WRITE},
                                                  sampled(exprp->cloneTreePure(false))};
-        m_modp->addStmtsp(new AstAlways{flp, VAlwaysKwd::ALWAYS_COMB, nullptr, assignp});
+        AstAlways* const alwaysp = new AstAlways{flp, VAlwaysKwd::ALWAYS_COMB, nullptr, assignp};
+        alwaysp->isBoundsCheck(true);  // NFA bookkeeping, not user logic
+        m_modp->addStmtsp(alwaysp);
         return tempVarp;
     }
 
@@ -1871,8 +1873,10 @@ class SvaNfaLowering final {
             bodyp = AstNode::addNextNull(bodyp, snapshotp);
         }
         if (!bodyp) return;
-        m_modp->addStmtsp(
-            new AstAlways{c.flp, VAlwaysKwd::ALWAYS, c.senTreep->cloneTree(false), bodyp});
+        AstAlways* const alwaysp
+            = new AstAlways{c.flp, VAlwaysKwd::ALWAYS, c.senTreep->cloneTree(false), bodyp};
+        alwaysp->isBoundsCheck(true);  // NFA bookkeeping, not user logic
+        m_modp->addStmtsp(alwaysp);
     }
 
     // Phase 2b: Bitset ring-buffer delay always block.
@@ -1963,10 +1967,14 @@ class SvaNfaLowering final {
             clearCountp->addNext(new AstAssignDly{c.flp,
                                                   new AstVarRef{c.flp, idxp, VAccess::WRITE},
                                                   newTypedConstp(c.flp, idxp->dtypep(), 0)});
-            updateBodyp = new AstIf{c.flp, clearCondp, clearCountp, updateBodyp};
+            AstIf* const clearIfp = new AstIf{c.flp, clearCondp, clearCountp, updateBodyp};
+            clearIfp->isBoundsCheck(true);  // NFA bookkeeping guard, not user logic
+            updateBodyp = clearIfp;
 
-            m_modp->addStmtsp(new AstAlways{c.flp, VAlwaysKwd::ALWAYS,
-                                            c.senTreep->cloneTree(false), updateBodyp});
+            AstAlways* const alwaysp = new AstAlways{c.flp, VAlwaysKwd::ALWAYS,
+                                                     c.senTreep->cloneTree(false), updateBodyp};
+            alwaysp->isBoundsCheck(true);  // NFA bookkeeping, not user logic
+            m_modp->addStmtsp(alwaysp);
         }
     }
 
@@ -2014,17 +2022,22 @@ class SvaNfaLowering final {
                 c.flp, new AstVarRef{c.flp, c.vtx[ai]->datap()->doneLVarp, VAccess::WRITE},
                 new AstConst{c.flp, AstConst::BitTrue{}}};
             AstIf* const setLIfp = new AstIf{c.flp, gateLp, setLp, nullptr};
+            setLIfp->isBoundsCheck(true);  // NFA bookkeeping guard, not user logic
             AstAssignDly* const setRp = new AstAssignDly{
                 c.flp, new AstVarRef{c.flp, c.vtx[ai]->datap()->doneRVarp, VAccess::WRITE},
                 new AstConst{c.flp, AstConst::BitTrue{}}};
             AstIf* const setRIfp = new AstIf{c.flp, gateRp, setRp, nullptr};
+            setRIfp->isBoundsCheck(true);  // NFA bookkeeping guard, not user logic
             setLIfp->addNext(setRIfp);
 
             AstNodeExpr* const clearCondp = new AstLogOr{
                 c.flp, killActive(c), c.vtx[ai]->datap()->stateSigp->cloneTreePure(false)};
             AstIf* const topp = new AstIf{c.flp, clearCondp, clearLp, setLIfp};
-            m_modp->addStmtsp(
-                new AstAlways{c.flp, VAlwaysKwd::ALWAYS, c.senTreep->cloneTree(false), topp});
+            topp->isBoundsCheck(true);  // NFA bookkeeping guard, not user logic
+            AstAlways* const alwaysp
+                = new AstAlways{c.flp, VAlwaysKwd::ALWAYS, c.senTreep->cloneTree(false), topp};
+            alwaysp->isBoundsCheck(true);  // NFA bookkeeping, not user logic
+            m_modp->addStmtsp(alwaysp);
         }
     }
 
@@ -2032,8 +2045,10 @@ class SvaNfaLowering final {
         AstAssignDly* const ackp
             = new AstAssignDly{c.flp, new AstVarRef{c.flp, c.killVarp, VAccess::WRITE},
                                assertKillGet(c.flp, c.assertType, c.directiveType)};
-        m_modp->addStmtsp(
-            new AstAlways{c.flp, VAlwaysKwd::ALWAYS, c.senTreep->cloneTree(false), ackp});
+        AstAlways* const alwaysp
+            = new AstAlways{c.flp, VAlwaysKwd::ALWAYS, c.senTreep->cloneTree(false), ackp};
+        alwaysp->isBoundsCheck(true);  // NFA bookkeeping, not user logic
+        m_modp->addStmtsp(alwaysp);
     }
 
     // Phase 3/3a/3b: Compute terminal match/reject signals, required-step reject,
@@ -2881,11 +2896,13 @@ class AssertNfaVisitor final : public VNVisitor {
             = new AstAdd{flp, new AstVarRef{flp, cntp, VAccess::READ},
                          new AstConst{flp, AstConst::WidthedValue{}, 32, 1u}};
         incrExprp->dtypeFrom(cntp);
-        m_modp->addStmtsp(new AstAlways{
+        AstAlways* const disableCntAlwaysp = new AstAlways{
             flp, VAlwaysKwd::ALWAYS,
             new AstSenTree{flp, new AstSenItem{flp, VEdgeType::ET_POSEDGE,
                                                disableExprp->cloneTreePure(false)}},
-            new AstAssign{flp, new AstVarRef{flp, cntp, VAccess::WRITE}, incrExprp}});
+            new AstAssign{flp, new AstVarRef{flp, cntp, VAccess::WRITE}, incrExprp}};
+        disableCntAlwaysp->isBoundsCheck(true);  // NFA bookkeeping, not user logic
+        m_modp->addStmtsp(disableCntAlwaysp);
 
         AstVar* const snapp = new AstVar{flp, VVarType::MODULETEMP, cntName + "__snap", u32DTypep};
         snapp->lifetime(VLifetime::STATIC_EXPLICIT);
@@ -3006,8 +3023,10 @@ class AssertNfaVisitor final : public VNVisitor {
                 new AstAssign{flp, new AstVarRef{flp, remainingFailCountVarp, VAccess::WRITE},
                               decrementedFailCountp});
             replayBlockp->addStmtsp(replayLoopp);
-            m_modp->addStmtsp(
-                new AstAlways{flp, VAlwaysKwd::ALWAYS, threadFailReplaySenTreep, replayBlockp});
+            AstAlways* const alwaysp
+                = new AstAlways{flp, VAlwaysKwd::ALWAYS, threadFailReplaySenTreep, replayBlockp};
+            alwaysp->isBoundsCheck(true);  // NFA bookkeeping, not user logic
+            m_modp->addStmtsp(alwaysp);
         }
     }
 

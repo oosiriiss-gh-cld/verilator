@@ -9,7 +9,11 @@ module t (
     input rst_both_l,
     input rst_sync_l,
     input rst_async_l,
-    input d
+    input d,
+    input a,
+    input b,
+    input c,
+    input e
 );
 
   reg q1;
@@ -69,5 +73,16 @@ module t (
   // 'disable iff' sampling a reset that's used async elsewhere is not a real
   // synchronous reset use, and should not cause a (second) warning
   DisableIffAsync: assert property (@(posedge clk) disable iff ((rst_async_l) !== 1'b0) ($c(1'b1)));
+
+  // Same, but the ranged-delay sequence forces the NFA delay-ring lowering
+  // path, which historically dropped the mark when the resulting always
+  // block was split by V3Split
+  DisableIffAsyncRanged: assert property (@(posedge clk) disable iff ((rst_async_l) !== 1'b0)
+                                          (a ##[1:3] b));
+
+  // Same, but the 'and' sequence combinator forces the NFA AND-combiner
+  // done-latch lowering path
+  DisableIffAsyncAnd: assert property (@(posedge clk) disable iff ((rst_async_l) !== 1'b0)
+                                       ((a ##1 b) and (c ##2 e)));
 
 endmodule
