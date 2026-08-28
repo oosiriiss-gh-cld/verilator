@@ -1,0 +1,49 @@
+#!/bin/sh
+# DESCRIPTION: Verilator: sv-bugpoint check script for a SYNCASYNCNET warning
+#
+# Usage:
+#   Install sv-bugpoint (https://github.com/antmicro/sv-bugpoint), then run:
+#
+#     SIGNAL=rst_ni \
+#     VERILATOR_FLAGS="--timing --top-module my_top -Iinclude/dir" \
+#     sv-bugpoint OUT_DIR nodist/sv_bugpoint_check_syncasyncnet INPUT.v [INPUT.v...]
+#
+#   sv-bugpoint calls this script with the (shrinking) candidate SystemVerilog
+#   file(s) as arguments, on every reduction attempt. This script exits 0 (and
+#   sv-bugpoint keeps the reduction) only if compiling the candidate still
+#   produces the %Warning-SYNCASYNCNET for SIGNAL, complete with both its
+#   "Location of async usage" and "Location of sync usage" sub-messages; it
+#   exits non-zero (and sv-bugpoint reverts the reduction) otherwise. Matching
+#   is done on the warning text rather than file/line/column, since those
+#   shift on every reduction step.
+#
+# Environment variables:
+#   SIGNAL            Name of the signal reported as flopped both sync and
+#                      async (default: rst_ni, matching the warning below).
+#   VERILATOR         Path to the verilator binary (default: verilator).
+#   VERILATOR_FLAGS   Extra flags needed to lint the design, e.g. --top-module,
+#                      -I include paths, -D defines, --timing, etc.
+#
+# Example warning this hunts for:
+#   %Warning-SYNCASYNCNET: t/t_test.v:556:11: Signal flopped as both
+#                          synchronous and async: 'rst_ni'
+#                          t/t_test.v:631:12: ... Location of async usage
+#                          t/t_test.v:854:75: ... Location of sync usage
+#
+# This file ONLY is placed under the Creative Commons Public Domain.
+# SPDX-FileCopyrightText: 2026 Wilson Snyder
+# SPDX-License-Identifier: CC0-1.0
+
+SIGNAL="${SIGNAL:-rst_ni}"
+VERILATOR="${VERILATOR:-verilator}"
+
+if [ "$#" -eq 0 ]; then
+    echo "%Error: sv_bugpoint_check_syncasyncnet: no input files given" >&2
+    exit 1
+fi
+
+actual_stderr=$(timeout 60 "$VERILATOR" --lint-only -Wall $VERILATOR_FLAGS "$@" 2>&1 >/dev/null)
+
+echo "$actual_stderr" | grep -q "Signal flopped as both synchronous and async: '$SIGNAL'" \
+    && echo "$actual_stderr" | grep -q '\.\.\. Location of async usage' \
+    && echo "$actual_stderr" | grep -q '\.\.\. Location of sync usage'
