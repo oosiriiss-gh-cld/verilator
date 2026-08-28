@@ -689,7 +689,11 @@ class AssertVisitor final : public VNVisitor {
             failsp = newIfAssertFailOn(failsp, nodep->directive(), nodep->userType());
         }
         AstNode* bodysp = assertBody(nodep, propExprp, passsp, failsp);
-        if (disablep) bodysp = new AstIf{flp, new AstLogNot{flp, disablep}, bodysp};
+        if (disablep) {
+            AstIf* const disableIfp = new AstIf{flp, new AstLogNot{flp, disablep}, bodysp};
+            disableIfp->isBoundsCheck(true);  // To avoid LATCH/SYNCASYNCNET warnings
+            bodysp = disableIfp;
+        }
         // Add assertOn check last, for better combining
         if (!seqEvent) bodysp = newIfAssertOn(bodysp, nodep->directive(), nodep->userType());
         if (sentreep) bodysp = new AstAlways{flp, VAlwaysKwd::ALWAYS, sentreep, bodysp};

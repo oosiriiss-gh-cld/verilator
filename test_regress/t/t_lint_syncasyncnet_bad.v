@@ -66,4 +66,8 @@ module t (
     if (mirror != 1'd0) settle <= settle + 16'd1;
   end
 
+  // 'disable iff' sampling a reset that's used async elsewhere is not a real
+  // synchronous reset use, and should not cause a (second) warning
+  DisableIffAsync: assert property (@(posedge clk) disable iff ((rst_async_l) !== 1'b0) ($c(1'b1)));
+
 endmodule
