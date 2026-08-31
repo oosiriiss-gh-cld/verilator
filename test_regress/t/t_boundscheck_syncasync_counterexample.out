@@ -1,0 +1,30 @@
+%Warning-WIDTHEXPAND: t/t_boundscheck_syncasync_counterexample.v:40:28: Operator COND expects 8 bits on the Conditional True, but Conditional True's VARREF 'd' generates 1 bits.
+                                                                      : ... note: In instance 't'
+   40 |     mem[idx] <= rst_both_l ? d : 1'b0;
+      |                            ^
+                      ... For warning description see https://verilator.org/warn/WIDTHEXPAND?v=latest
+                      ... Use "/* verilator lint_off WIDTHEXPAND */" and lint_on around source to disable this message.
+%Warning-WIDTHEXPAND: t/t_boundscheck_syncasync_counterexample.v:40:28: Operator COND expects 8 bits on the Conditional False, but Conditional False's CONST '1'h0' generates 1 bits.
+                                                                      : ... note: In instance 't'
+   40 |     mem[idx] <= rst_both_l ? d : 1'b0;
+      |                            ^
+%Warning-UNUSEDSIGNAL: t/t_boundscheck_syncasync_counterexample.v:26:13: Signal is not used: 'mem'
+                                                                       : ... note: In instance 't'
+   26 |   reg [7:0] mem[0:4];
+      |             ^~~
+                       ... For warning description see https://verilator.org/warn/UNUSEDSIGNAL?v=latest
+                       ... Use "/* verilator lint_off UNUSEDSIGNAL */" and lint_on around source to disable this message.
+%Warning-UNUSEDSIGNAL: t/t_boundscheck_syncasync_counterexample.v:27:7: Signal is not used: 'q3'
+                                                                      : ... note: In instance 't'
+   27 |   reg q3;
+      |       ^~
+%Warning-SYNCASYNCNET: t/t_boundscheck_syncasync_counterexample.v:18:11: Signal flopped as both synchronous and async: 'rst_both_l'
+                       t/t_boundscheck_syncasync_counterexample.v:31:10: ... Location of async usage
+   31 |     if (~rst_both_l) q3 <= 1'b0;
+      |          ^~~~~~~~~~
+                       t/t_boundscheck_syncasync_counterexample.v:40:17: ... Location of sync usage
+   40 |     mem[idx] <= rst_both_l ? d : 1'b0;
+      |                 ^~~~~~~~~~
+                       ... For warning description see https://verilator.org/warn/SYNCASYNCNET?v=latest
+                       ... Use "/* verilator lint_off SYNCASYNCNET */" and lint_on around source to disable this message.
+%Error: Exiting due to
