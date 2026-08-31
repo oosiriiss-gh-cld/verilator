@@ -41,6 +41,7 @@
 #include "V3FileLine.h"
 #include "V3Global.h"
 #include "V3MemberMap.h"
+#include "V3Number.h"
 #include "V3Task.h"
 #include "V3UniqueNames.h"
 
@@ -1011,9 +1012,20 @@ class ConstraintExprVisitor final : public VNVisitor {
                               const int width) {
         if (condp) {
             FileLine* const flp = exprp->fileline();
-            return new AstCond{
+            AstCond* const condWrapperp = new AstCond{
                 flp, condp, exprp,
                 getConstFormat(new AstConst{flp, AstConst::WidthedValue{}, width, 0})};
+            // If this AstCond ends up as the direct replacement for a node under
+            // iteration (e.g. via editSingle()'s m_wantSingle path in
+            // visit(AstConstraintExpr)), AstNode::iterateAndNext() will visit it
+            // again immediately (that's the documented contract of replaceWith()
+            // under an active iteration). Without user1(), editFormat() would then
+            // see an ordinary-looking AstCond and const-format it as a raw numeric
+            // value, corrupting the SMT-text strings already built for thenp/elsep.
+            // Marking it keeps visit(AstCond) on its "cond/then/else are already
+            // SMT text" path instead.
+            condWrapperp->user1(true);
+            return condWrapperp;
         }
         return exprp;
     }
@@ -1089,7 +1101,7 @@ class ConstraintExprVisitor final : public VNVisitor {
         AstSFormatF* const newp = new AstSFormatF{nodep->fileline(), smtExpr, false, argsp};
         if (m_structSel && newp->name() == "(select %s %s)") {
             newp->name("%s.%s");
-            if (!VN_IS(nodep, AssocSel)) newp->exprsp()->nextp()->name("%x");
+            if (!VN_IS(nodep, AssocSel)) newp->exprsp()->nextp()->name("%0x");
         }
         nodep->replaceWith(newp);
         VL_DO_DANGLING(pushDeletep(nodep), nodep);
@@ -2141,8 +2153,27 @@ class ConstraintExprVisitor final : public VNVisitor {
             // Index is constant or non-rand -- format as hex literal.
             // Keep a pre-edit clone for the rand_mode hoist below.
             AstNodeExpr* const origp = nodep->cloneTree(false);
+            AstNodeExpr* const bitp = nodep->bitp()->unlinkFrBack(&handle);
+            if (m_structSel) {
+                const AstUnpackArrayDType* const arrDtypep
+                    = VN_AS(nodep->fromp()->dtypep()->skipRefp(), UnpackArrayDType);
+                const uint32_t size = arrDtypep->elementsConst();
+                const int32_t sizeNeededBits = V3Number::log2b(size) + 1;
+                AstNodeExpr* indexCmpp = bitp->cloneTreePure(false);
+                // Make sure array's size is representable in index's bitwidth
+                if (indexCmpp->width() < sizeNeededBits) {
+                    // Due to bitp truncation in V3Width, index is unsigned, we cannot use
+                    // AstExtendS, as it would lead to invalid value when index's MSB is 1
+                    indexCmpp = new AstExtend{fl, indexCmpp, sizeNeededBits};
+                }
+                // Due to bitp truncation in V3Width, index is unsigned, so unsigned Lt is enough
+                AstNodeExpr* const condp = new AstLt{
+                    fl, indexCmpp,
+                    new AstConst{fl, AstConst::WidthedValue{}, indexCmpp->width(), size}};
+                m_conditionp = m_conditionp ? new AstLogAnd{fl, m_conditionp, condp} : condp;
+            }
             AstNodeExpr* const indexp
-                = new AstSFormatF{fl, "#x%8x", false, nodep->bitp()->unlinkFrBack(&handle)};
+                = new AstSFormatF{fl, m_structSel ? "#x%0x" : "#x%8x", false, bitp};
             handle.relink(indexp);
             AstSFormatF* const newp = editSMT(nodep, nodep->fromp(), indexp);
             if (!newp || !hoistRandModeOverSelect(newp, origp)) {
@@ -2587,7 +2618,13 @@ class ConstraintExprVisitor final : public VNVisitor {
                 nodep->exprp(neqp);
             }
         }
-        iterateChildren(nodep);
+        {
+            VL_RESTORER(m_conditionp);
+            m_conditionp = nullptr;
+            const int32_t exprWidth = nodep->exprp()->width();
+            iterateChildren(nodep);
+            nodep->exprp(wrapWithCond(nodep->exprp()->unlinkFrBack(), m_conditionp, exprWidth));
+        }
         if (m_wantSingle) {
             nodep->replaceWith(nodep->exprp()->unlinkFrBack());
             VL_DO_DANGLING(nodep->deleteTree(), nodep);
@@ -2815,7 +2852,9 @@ class ConstraintExprVisitor final : public VNVisitor {
                 const int resultWidth = nodep->dtypep()->width();
                 const VSigning resultSigning = nodep->dtypep()->numeric();
 
-                AstNode* perElemExprp = withp->exprp()->cloneTreePure(false);
+                AstNodeExpr* perElemExprp
+                    = VN_CAST(withp->exprp()->cloneTreePure(false), NodeExpr);
+                UASSERT_OBJ(perElemExprp, nodep, "'with' reduction exprp() is not an AstNodeExpr");
                 if (AstLambdaArgRef* const rootRefp = VN_CAST(perElemExprp, LambdaArgRef)) {
                     if (rootRefp->index()) {
                         // item.index at root -> replace with loop variable, adjust width
@@ -2859,7 +2898,12 @@ class ConstraintExprVisitor final : public VNVisitor {
 
                 cstmtp->add("ret = \"(" + std::string(smtOp) + " \" + ret + \" \";\n");
                 cstmtp->add("ret += ");
-                cstmtp->add(iterateSubtreeReturnEdits(perElemExprp));
+                const int32_t elemWidth = perElemExprp->width();
+                VL_RESTORER(m_conditionp);
+                m_conditionp = nullptr;
+                AstNodeExpr* const elemExprp
+                    = VN_AS(iterateSubtreeReturnEdits(perElemExprp), NodeExpr);
+                cstmtp->add(wrapWithCond(elemExprp, m_conditionp, elemWidth));
                 cstmtp->add(";\n");
                 cstmtp->add("ret += \")\";\n");
             } else {
