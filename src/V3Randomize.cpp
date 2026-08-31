@@ -1001,6 +1001,9 @@ class ConstraintExprVisitor final : public VNVisitor {
                                nodep};
     }
     bool editFormat(AstNodeExpr* nodep) {
+        // A converted expression is re-visited when it replaces its parent node. It is
+        // already SMT text (string typed), so report it as formatted and leave it alone
+        if (nodep->isString()) return true;
         if (nodep->user1()) return false;
         // Replace computable expression with SMT constant
         VNRelinker handle;
@@ -1981,9 +1984,6 @@ class ConstraintExprVisitor final : public VNVisitor {
         editSMT(nodep, nodep->lhsp(), nodep->rhsp(), nodep->thsp());
     }
     void visit(AstCond* nodep) override {
-        // A converted expression is re-visited when it replaces its parent node, and a
-        // string-typed conditional is already SMT text (like AstSFormatF), so leave it alone
-        if (nodep->isString()) return;
         if (editFormat(nodep)) return;
         if (!nodep->condp()->user1()) {
             // Do not burden the solver if cond computable: (cond ? "then" : "else")
