@@ -1,0 +1,10 @@
+%Warning-SYNCASYNCNET: t/t_lint_syncasyncnet_bounds_bad.v:15:18: Signal flopped as both synchronous and async: 'rst_n'
+                       t/t_lint_syncasyncnet_bounds_bad.v:29:10: ... Location of async usage
+   29 |     if (!rst_n) o <= 8'h00;
+      |          ^~~~~
+                       t/t_lint_syncasyncnet_bounds_bad.v:24:19: ... Location of sync usage
+   24 |     mem[waddr] <= rst_n ? d : 8'h00;
+      |                   ^~~~~
+                       ... For warning description see https://verilator.org/warn/SYNCASYNCNET?v=latest
+                       ... Use "/* verilator lint_off SYNCASYNCNET */" and lint_on around source to disable this message.
+%Error: Exiting due to

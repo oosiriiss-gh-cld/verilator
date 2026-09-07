@@ -203,6 +203,7 @@ class GateBuildVisitor final : public VNVisitorConst {
     bool m_inStaticActive = false;  // Underneath static active
     bool m_inInitialActive = false;  // Underneath initial active
     bool m_inSenItem = false;  // Underneath AstSenItem; any varrefs are clocks
+    bool m_isUnderAssertion = false;  // Part of assertion statement
 
     // METHODS
     void checkNode(AstNode* nodep) {
@@ -284,6 +285,11 @@ class GateBuildVisitor final : public VNVisitorConst {
             iterateLogic(nodep, false, nullptr, "senItem");
         }
     }
+    void visit(AstNodeIf* nodep) override {
+        VL_RESTORER(m_isUnderAssertion);
+        if (nodep->isUnderAssertion()) m_isUnderAssertion = true;
+        iterateChildrenConst(nodep);
+    }
     void visit(AstNodeVarRef* nodep) override {
         if (!m_logicVertexp) return;
 
@@ -293,7 +299,7 @@ class GateBuildVisitor final : public VNVisitorConst {
         if (m_inSenItem) {
             vVtxp->setIsClock();
             vscp->user2(true);
-        } else if (m_inEdgeActive && nodep->access().isReadOnly()) {
+        } else if (m_inEdgeActive && nodep->access().isReadOnly() && !m_isUnderAssertion) {
             // For SYNCASYNCNET
             if (vscp->user2()) {
                 if (!vVtxp->rstAsyncNodep()) vVtxp->rstAsyncNodep(nodep);

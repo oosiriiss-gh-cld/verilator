@@ -568,6 +568,9 @@ protected:
             // non-pure to separate from other pure statements.
             AstIf* const clonep = new AstIf{nodep->fileline(), nodep->condp()->cloneTree(true),
                                             if_placeholderp, else_placeholderp};
+            clonep->isBoundsCheck(nodep->isBoundsCheck());
+            clonep->isUnderAssertion(nodep->isUnderAssertion());
+            clonep->branchPred(nodep->branchPred());
             const AstIf* const origp = VN_CAST(nodep, If);
             if (origp) {
                 // Preserve pragmas from unique if's
