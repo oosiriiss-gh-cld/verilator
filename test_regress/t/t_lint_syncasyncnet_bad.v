@@ -6,10 +6,17 @@
 
 module b (
   input clk_b,
-  input rst_b
+  input rst_b,
+  input d_b,
+  output reg q_b
 );
 /* verilator no_inline_module */
-  assert property (@(posedge clk_b) rst_b);
+  // Synchronous reset usage of the net the parent connects to 'rst_b'.
+  // V3Dfg substitutes this reference with the parent's net, so the warning
+  // must still point at this line and not at the parent's declaration.
+  always @(posedge clk_b) begin
+    q_b <= rst_b ? d_b : 1'b0;
+  end
 endmodule
 
 module t (
@@ -65,15 +72,23 @@ module t (
     if (0 && q3 && q4 && q5);
   end
 
+  // Asynchronous reset usage of 'rst_both_b', synchronous usage is in 'b'
+  wire q_b;
   b t_b (
     .clk_b(clk),
-    .rst_b(rst_both_b)
+    .rst_b(rst_both_b),
+    .d_b(d),
+    .q_b(q_b)
   );
   reg q6;
-  always_ff @(negedge rst_both_b) begin
-    if (rst_both_b) begin
-      q6 <= q6;
+  always @(posedge clk or negedge rst_both_b) begin
+    if (~rst_both_b) begin
+      q6 <= 1'b0;
     end
+    else begin
+      q6 <= q_b;
+    end
+    if (0 && q6);
   end
 
   // Issue #7980 - should not cause a warning
