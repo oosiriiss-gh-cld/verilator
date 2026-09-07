@@ -309,7 +309,7 @@ static AstIf* newPassOnIf(FileLine* flp, AstNodeExpr* firep, AstNode* bodyp, VAs
     AstNodeExpr* const condp
         = new AstLogAnd{flp, firep, assertPassOnCond(flp, type, directiveType, vacuous)};
     AstIf* const ifp = new AstIf{flp, condp, bodyp};
-    ifp->isBoundsCheck(true);
+    ifp->isUnderAssertion(true);
     ifp->user1(true);
     return ifp;
 }
@@ -551,7 +551,10 @@ class SvaNfaBuilder final {
         m_modp->addStmtsp(tempVarp);
         AstAssign* const assignp = new AstAssign{flp, new AstVarRef{flp, tempVarp, VAccess::WRITE},
                                                  sampled(exprp->cloneTreePure(false))};
-        m_modp->addStmtsp(new AstAlways{flp, VAlwaysKwd::ALWAYS_COMB, nullptr, assignp});
+        AstAlways* const hoistAlwaysp
+            = new AstAlways{flp, VAlwaysKwd::ALWAYS_COMB, nullptr, assignp};
+        hoistAlwaysp->isUnderAssertion(true);
+        m_modp->addStmtsp(hoistAlwaysp);
         return tempVarp;
     }
 
@@ -3648,8 +3651,10 @@ public:
                                               "(vlSymsp->_vm_contextp__->finishPending()"
                                               " || vlSymsp->_vm_contextp__->gotFinish())",
                                               1}};
-        m_modp->addStmtsp(new AstAlwaysObserved{flp, req.senTreep->cloneTree(false),
-                                                new AstIf{flp, notFinishp, observedBodyp}});
+        AstAlwaysObserved* const observedp = new AstAlwaysObserved{
+            flp, req.senTreep->cloneTree(false), new AstIf{flp, notFinishp, observedBodyp}};
+        observedp->isUnderAssertion(true);
+        m_modp->addStmtsp(observedp);
 
         // Clear userp on every vertex before vertexData unique_ptrs are destroyed.
         for (int i = 0; i < N; ++i) vtx[i]->userp(nullptr);
@@ -4018,8 +4023,10 @@ class AssertNfaVisitor final : public VNVisitor {
             sampleBodyp = AstNode::addNext(sampleBodyp, assignp);
         }
         if (sampleBodyp) {
-            m_modp->addStmtsp(
-                new AstAlways{flp, VAlwaysKwd::ALWAYS, senTreep->cloneTree(false), sampleBodyp});
+            AstAlways* const sampleAlwaysp
+                = new AstAlways{flp, VAlwaysKwd::ALWAYS, senTreep->cloneTree(false), sampleBodyp};
+            sampleAlwaysp->isUnderAssertion(true);
+            m_modp->addStmtsp(sampleAlwaysp);
         }
         return normalizedp;
     }
@@ -4037,11 +4044,13 @@ class AssertNfaVisitor final : public VNVisitor {
             = new AstAdd{flp, new AstVarRef{flp, cntp, VAccess::READ},
                          new AstConst{flp, AstConst::WidthedValue{}, 32, 1u}};
         incrExprp->dtypeFrom(cntp);
-        m_modp->addStmtsp(new AstAlways{
+        AstAlways* const cntAlwaysp = new AstAlways{
             flp, VAlwaysKwd::ALWAYS,
             new AstSenTree{flp, new AstSenItem{flp, VEdgeType::ET_POSEDGE,
                                                disableExprp->cloneTreePure(false)}},
-            new AstAssign{flp, new AstVarRef{flp, cntp, VAccess::WRITE}, incrExprp}});
+            new AstAssign{flp, new AstVarRef{flp, cntp, VAccess::WRITE}, incrExprp}};
+        cntAlwaysp->isUnderAssertion(true);
+        m_modp->addStmtsp(cntAlwaysp);
 
         AstVar* const snapp = new AstVar{flp, VVarType::MODULETEMP, cntName + "__snap", u32DTypep};
         snapp->lifetime(VLifetime::STATIC_EXPLICIT);
@@ -4184,12 +4193,12 @@ class AssertNfaVisitor final : public VNVisitor {
         AstIf* const failOnp
             = new AstIf{flp, assertFailOnCond(flp, assertp->userType(), assertp->directive()),
                         repeatAction(flp, countp, actionp)};
-        failOnp->isBoundsCheck(true);
+        failOnp->isUnderAssertion(true);
         failOnp->user1(true);
         failOnp->user2(true);
         AstIf* const assertOnp = new AstIf{
             flp, assertOnCond(flp, assertp->userType(), assertp->directive()), failOnp};
-        assertOnp->isBoundsCheck(true);
+        assertOnp->isUnderAssertion(true);
         assertOnp->user2(true);
         m_modp->addStmtsp(new AstFinal{flp, assertOnp});
     }

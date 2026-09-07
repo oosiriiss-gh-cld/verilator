@@ -515,6 +515,7 @@ public:
             // V3Activate already moved it to a parent node.
             AstAlways* const alwaysp
                 = new AstAlways{m_origAlwaysp->fileline(), VAlwaysKwd::ALWAYS, nullptr, nullptr};
+            alwaysp->isUnderAssertion(m_origAlwaysp->isUnderAssertion());
             // Put a placeholder node into stmtp to track our position.
             // We'll strip these out after the blocks are fully cloned.
             AstSplitPlaceholder* const placeholderp = makePlaceholderp();

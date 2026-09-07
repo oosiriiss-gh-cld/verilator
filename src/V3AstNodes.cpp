@@ -1935,11 +1935,13 @@ void AstNodeProcedure::dump(std::ostream& str) const {
     this->AstNode::dump(str);
     if (isSuspendable()) str << " [SUSP]";
     if (needProcess()) str << " [NPRC]";
+    if (isUnderAssertion()) str << " [ASSERT]";
 }
 
 void AstNodeProcedure::dumpJson(std::ostream& str) const {
     dumpJsonBoolFuncIf(str, isSuspendable);
     dumpJsonBoolFuncIf(str, needProcess);
+    dumpJsonBoolFuncIf(str, isUnderAssertion);
     dumpJsonGen(str);
 }
 

@@ -218,6 +218,7 @@ class AssertDeFutureVisitor final : public VNVisitor {
             AstSenTree* const sentreep = m_futurep->sentreep();
             AstAlways* const alwaysp = new AstAlways{nodep->fileline(), VAlwaysKwd::ALWAYS,
                                                      sentreep->cloneTree(false), nullptr};
+            alwaysp->isUnderAssertion(true);
             m_modp->addStmtsp(alwaysp);
             outvarp = new AstVar{nodep->fileline(), VVarType::MODULETEMP,
                                  "__Vnotfuture" + cvtToStr(m_pastNum) + "_" + nodep->name(),
@@ -599,6 +600,7 @@ class AssertVisitor final : public VNVisitor {
             FileLine* const flp = exprp->fileline();
             // Create the always block that computes the delayed values
             alwayspr = new AstAlways{flp, VAlwaysKwd::ALWAYS, senTreep, nullptr};
+            alwayspr->isUnderAssertion(true);
             m_modp->addStmtsp(alwayspr);
             // Create the once-delayed variable
             const std::string name = "_Vpast_" + cvtToStr(m_modPastNum++) + "_1";
@@ -674,9 +676,13 @@ class AssertVisitor final : public VNVisitor {
                                                   " || vlSymsp->_vm_contextp__->gotFinish())",
                                                   1}};
             bodysp = new AstIf{flp, notFinishp, bodysp};
-            return new AstAlwaysReactive{flp, sentreep, bodysp};
+            AstAlwaysReactive* const reactivep = new AstAlwaysReactive{flp, sentreep, bodysp};
+            reactivep->isUnderAssertion(true);
+            return reactivep;
         }
-        return new AstAlways{flp, VAlwaysKwd::ALWAYS, sentreep, bodysp};
+        AstAlways* const alwaysp = new AstAlways{flp, VAlwaysKwd::ALWAYS, sentreep, bodysp};
+        alwaysp->isUnderAssertion(true);
+        return alwaysp;
     }
 
     void visitAssertionIterate(AstNodeCoverOrAssert* nodep, AstNode* failsp) {

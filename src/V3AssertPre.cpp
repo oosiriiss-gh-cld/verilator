@@ -779,6 +779,7 @@ private:
         AstIf* const ifp = new AstIf{flp, exprClonep, incrAssignp, resetAssignp};
         AstSenTree* const senTreep = newSenTree(nodep);
         AstAlways* const alwaysp = new AstAlways{flp, VAlwaysKwd::ALWAYS, senTreep, ifp};
+        alwaysp->isUnderAssertion(true);
         cntVarp->addNextHere(alwaysp);
         // Match: cnt >= N-1 (previous cycles via NBA) && expr (current cycle)
         AstNodeExpr* const cntCheckp = new AstGte{flp, new AstVarRef{flp, cntVarp, VAccess::READ},
@@ -1240,6 +1241,7 @@ private:
                 if (matchAssignsp) {
                     AstAlways* const alwaysp
                         = new AstAlways{flp, VAlwaysKwd::ALWAYS_COMB, nullptr, matchAssignsp};
+                    alwaysp->isUnderAssertion(true);
                     m_modp->addStmtsp(alwaysp);
                 }
             } else {
@@ -1268,6 +1270,7 @@ private:
                         = new AstIf{flp, antExprp->cloneTreePure(false), matchAssignsp};
                     AstAlways* const alwaysp
                         = new AstAlways{flp, VAlwaysKwd::ALWAYS, newSenTree(nodep), condp};
+                    alwaysp->isUnderAssertion(true);
                     m_modp->addStmtsp(alwaysp);
                 }
             }
@@ -1572,6 +1575,7 @@ private:
                                 new AstSenTree{flp, new AstSenItem{flp, VEdgeType::ET_POSEDGE,
                                                                    m_disablep->cloneTree(false)}},
                                 incrStmtp};
+            alwaysp->isUnderAssertion(true);
             disableCntp->addNextHere(alwaysp);
 
             // Store value of that counter at the beginning of sequence evaluation
