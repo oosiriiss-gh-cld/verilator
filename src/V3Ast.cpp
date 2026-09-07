@@ -132,6 +132,7 @@ AstNode::AstNode(VNType t, FileLine* fl)
     m_flags.didWidth = false;
     m_flags.doingWidth = false;
     m_flags.protect = true;
+    m_flags.verificationLogic = false;
     m_flags.unused = 0;  // Initializing this avoids a read-modify-write on construction
     editCountInc();
 }
@@ -574,6 +575,9 @@ void AstNode::addOp4p(AstNode* newp) {
 void AstNode::replaceWith(AstNode* newp) {
     // Replace oldp with this
     // Unlike a unlink/relink, children are changed to point to the new node.
+    // 'newp' takes over this node's position in the tree, so it inherits its verification
+    // logic provenance, keeping the mark across rewrites (see AstNode::isVerificationLogic).
+    if (VL_UNLIKELY(isVerificationLogic())) newp->isVerificationLogic(true);
     VNRelinker repHandle;
     this->unlinkFrBack(&repHandle);
     repHandle.relink(newp);

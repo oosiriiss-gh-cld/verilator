@@ -456,8 +456,9 @@ class AstNode VL_NOT_FINAL {
         bool didWidth : 1;  // Did V3Width computation
         bool doingWidth : 1;  // Inside V3Width
         bool protect : 1;  // Protect name if protection is on
+        bool verificationLogic : 1;  // Compiler-generated verification logic, see accessor
         // Space for more flags here (there must be 8 bits in total)
-        uint8_t unused : 5;
+        uint8_t unused : 4;
     } m_flags;  // Attribute flags
 
     // State variable used by V3Broken for consistency checking. The top bit of this is byte is a
@@ -688,6 +689,17 @@ public:
     void doingWidth(bool flag) { m_flags.doingWidth = flag; }
     bool protect() const VL_MT_SAFE { return m_flags.protect; }
     void protect(bool flag) { m_flags.protect = flag; }
+    // True if this node roots a subtree that Verilator generated to evaluate a verification
+    // or debug construct rather than to translate user RTL: an assertion or cover statement,
+    // its sampled-value ($past/$future) captures and enable/counter bookkeeping, or the
+    // scheduling logic behind $monitor/$strobe.  Such logic has no counterpart in the
+    // synthesized design, so style checks that reason about hardware structure (SYNCASYNCNET,
+    // LATCH) must ignore the node and everything below it.  The mark covers the whole
+    // subtree, so consumers carry it while descending; that keeps it independent of which
+    // node types a lowering happens to emit.  cloneTree() and replaceWith() propagate the
+    // mark; a pass that rebuilds an equivalent node from scratch must copy it explicitly.
+    bool isVerificationLogic() const VL_MT_SAFE { return m_flags.verificationLogic; }
+    void isVerificationLogic(bool flag) { m_flags.verificationLogic = flag; }
 
     // TODO stomp these width functions out, and call via dtypep() instead
     inline int width() const VL_MT_STABLE;

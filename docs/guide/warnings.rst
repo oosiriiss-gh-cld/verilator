@@ -2286,6 +2286,9 @@ List Of Warnings
    Mixing sync and async resets is usually a mistake. The warning may be
    disabled with a lint_off pragma around the net or flopped block.
 
+   Reads inside assertions do not count, as assertion logic is not
+   synthesized and so does not add a reset path to the design.
+
    Disabled by default as this is a code-style warning; it will simulate
    correctly.
 

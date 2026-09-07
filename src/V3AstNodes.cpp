@@ -1857,6 +1857,7 @@ void AstNode::dump(std::ostream& str) const {
 #endif
         << " {" << fileline()->filenameLetters() << std::dec << fileline()->lastLineno()
         << fileline()->firstColumnLetters() << "}";
+    if (isVerificationLogic()) str << " [VERIF]";
     const auto dumpUser = [&str](const char* prefix, const VNUser& user) {
         const std::string s = user.dumpStr([](const void* p) -> std::string {
             return nodeAddr(reinterpret_cast<const AstNode*>(p));
@@ -1935,13 +1936,11 @@ void AstNodeProcedure::dump(std::ostream& str) const {
     this->AstNode::dump(str);
     if (isSuspendable()) str << " [SUSP]";
     if (needProcess()) str << " [NPRC]";
-    if (isUnderAssertion()) str << " [ASSERT]";
 }
 
 void AstNodeProcedure::dumpJson(std::ostream& str) const {
     dumpJsonBoolFuncIf(str, isSuspendable);
     dumpJsonBoolFuncIf(str, needProcess);
-    dumpJsonBoolFuncIf(str, isUnderAssertion);
     dumpJsonGen(str);
 }
 

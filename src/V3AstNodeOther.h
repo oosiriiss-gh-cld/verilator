@@ -400,13 +400,11 @@ class AstNodeProcedure VL_NOT_FINAL : public AstNode {
     // @astgen op2 := stmtsp : List[AstNode] // Note: op1 is used in some sub-types only
     bool m_suspendable : 1;  // Is suspendable by a Delay, EventControl, etc.
     bool m_needProcess : 1;  // Uses VlProcess
-    bool m_isUnderAssertion : 1;  // Generated to evaluate an assertion, not user RTL
 protected:
     AstNodeProcedure(VNType t, FileLine* fl, AstNode* stmtsp)
         : AstNode{t, fl} {
         m_needProcess = false;
         m_suspendable = false;
-        m_isUnderAssertion = false;
         addStmtsp(stmtsp);
     }
 
@@ -420,11 +418,6 @@ public:
     void setSuspendable() { m_suspendable = true; }
     bool needProcess() const { return m_needProcess; }
     void setNeedProcess() { m_needProcess = true; }
-    // True if this procedure was created by assertion lowering rather than written by
-    // the user.  Such logic is not synthesized, so style checks that reason about
-    // hardware structure (e.g. SYNCASYNCNET) must ignore it.
-    bool isUnderAssertion() const { return m_isUnderAssertion; }
-    void isUnderAssertion(bool flag) { m_isUnderAssertion = flag; }
 };
 class AstNodeRange VL_NOT_FINAL : public AstNode {
     // A range, sized or unsized

@@ -216,9 +216,8 @@ class AssertDeFutureVisitor final : public VNVisitor {
         AstVar* outvarp;
         if (it == m_delayedVars.end()) {
             AstSenTree* const sentreep = m_futurep->sentreep();
-            AstAlways* const alwaysp = new AstAlways{nodep->fileline(), VAlwaysKwd::ALWAYS,
-                                                     sentreep->cloneTree(false), nullptr};
-            alwaysp->isUnderAssertion(true);
+            AstAlways* const alwaysp = verificationLogicp(new AstAlways{
+                nodep->fileline(), VAlwaysKwd::ALWAYS, sentreep->cloneTree(false), nullptr});
             m_modp->addStmtsp(alwaysp);
             outvarp = new AstVar{nodep->fileline(), VVarType::MODULETEMP,
                                  "__Vnotfuture" + cvtToStr(m_pastNum) + "_" + nodep->name(),
@@ -488,7 +487,7 @@ class AssertVisitor final : public VNVisitor {
 
         AstNodeExpr* const condp = assertOnCond(fl, type, directiveType);
         AstIf* const newp = new AstIf{fl, condp, bodyp};
-        newp->isUnderAssertion(true);
+        newp->isVerificationLogic(true);
         newp->user2(true);  // Mark as an assertOn() check
         return newp;
     }
@@ -499,7 +498,7 @@ class AssertVisitor final : public VNVisitor {
         FileLine* const fl = bodyp->fileline();
         AstNodeExpr* const condp = assertPassOnCond(fl, type, directiveType, vacuous);
         AstNodeIf* const newp = new AstIf{fl, condp, bodyp};
-        newp->isUnderAssertion(true);
+        newp->isVerificationLogic(true);
         newp->user1(true);  // Don't assert/cover this if
         newp->user2(true);  // Mark as an assertOn() check
         return newp;
@@ -511,7 +510,7 @@ class AssertVisitor final : public VNVisitor {
         FileLine* const fl = bodyp->fileline();
         AstNodeExpr* const condp = assertFailOnCond(fl, type, directiveType);
         AstNodeIf* const newp = new AstIf{fl, condp, bodyp};
-        newp->isUnderAssertion(true);
+        newp->isVerificationLogic(true);
         newp->user1(true);  // Don't assert/cover this if
         newp->user2(true);  // Mark as an assertOn() check
         return newp;
@@ -523,7 +522,7 @@ class AssertVisitor final : public VNVisitor {
         // It's more LIKELY that we'll take the nullptr if clause
         // than the sim-killing else clause:
         ifp->branchPred(VBranchPred::BP_LIKELY);
-        ifp->isUnderAssertion(true);
+        ifp->isVerificationLogic(true);
         return ifp;
     }
 
@@ -599,8 +598,8 @@ class AssertVisitor final : public VNVisitor {
         if (!alwayspr) {
             FileLine* const flp = exprp->fileline();
             // Create the always block that computes the delayed values
-            alwayspr = new AstAlways{flp, VAlwaysKwd::ALWAYS, senTreep, nullptr};
-            alwayspr->isUnderAssertion(true);
+            alwayspr
+                = verificationLogicp(new AstAlways{flp, VAlwaysKwd::ALWAYS, senTreep, nullptr});
             m_modp->addStmtsp(alwayspr);
             // Create the once-delayed variable
             const std::string name = "_Vpast_" + cvtToStr(m_modPastNum++) + "_1";
@@ -676,13 +675,9 @@ class AssertVisitor final : public VNVisitor {
                                                   " || vlSymsp->_vm_contextp__->gotFinish())",
                                                   1}};
             bodysp = new AstIf{flp, notFinishp, bodysp};
-            AstAlwaysReactive* const reactivep = new AstAlwaysReactive{flp, sentreep, bodysp};
-            reactivep->isUnderAssertion(true);
-            return reactivep;
+            return verificationLogicp(new AstAlwaysReactive{flp, sentreep, bodysp});
         }
-        AstAlways* const alwaysp = new AstAlways{flp, VAlwaysKwd::ALWAYS, sentreep, bodysp};
-        alwaysp->isUnderAssertion(true);
-        return alwaysp;
+        return verificationLogicp(new AstAlways{flp, VAlwaysKwd::ALWAYS, sentreep, bodysp});
     }
 
     void visitAssertionIterate(AstNodeCoverOrAssert* nodep, AstNode* failsp) {
@@ -912,7 +907,7 @@ class AssertVisitor final : public VNVisitor {
                                 newFireAssert(nodep, VAssertDirectiveType::VIOLATION_IF,
                                               assertType, "'unique if' statement violated"),
                                 newifp};
-                checkifp->isUnderAssertion(true);
+                checkifp->isVerificationLogic(true);
                 checkifp->branchPred(VBranchPred::BP_UNLIKELY);
                 nodep->replaceWith(checkifp);
                 VL_DO_DANGLING(pushDeletep(nodep), nodep);
@@ -1107,7 +1102,7 @@ class AssertVisitor final : public VNVisitor {
                                       pragmaStr + ", but multiple matches found" + valFmt,
                                       valFmt.empty() ? nullptr : exprp->cloneTreePure(false)));
                     ohotIfp->addThensp(zeroIfp);
-                    ohotIfp->isUnderAssertion(true);
+                    ohotIfp->isVerificationLogic(true);
                     ohotIfp->branchPred(VBranchPred::BP_UNLIKELY);
                     nodep->addNotParallelp(ohotIfp);
                 }
@@ -1276,9 +1271,10 @@ class AssertVisitor final : public VNVisitor {
                               new AstEq{fl, new AstConst{fl, monNum},
                                         newMonitorNumVarRefp(nodep, VAccess::READ)}},
                 stmtsp};
-            ifp->isUnderAssertion(true);
+            ifp->isVerificationLogic(true);
             ifp->branchPred(VBranchPred::BP_UNLIKELY);
-            AstNode* const newp = new AstAlways{fl, VAlwaysKwd::ALWAYS, monSenTree, ifp};
+            AstAlways* const newp
+                = verificationLogicp(new AstAlways{fl, VAlwaysKwd::ALWAYS, monSenTree, ifp});
             m_modp->addStmtsp(newp);
         } else if (nodep->displayType() == VDisplayType::DT_STROBE) {
             nodep->displayType(VDisplayType::DT_DISPLAY);
@@ -1295,9 +1291,9 @@ class AssertVisitor final : public VNVisitor {
             // Add "always_comb if (__Vstrobe) begin $display(...); __Vstrobe = '0; end"
             AstNode* const stmtsp = nodep;
             AstIf* const ifp = new AstIf{fl, new AstVarRef{fl, varp, VAccess::READ}, stmtsp};
-            ifp->isUnderAssertion(true);
+            ifp->isVerificationLogic(true);
             ifp->branchPred(VBranchPred::BP_UNLIKELY);
-            AstNode* const newp = new AstAlwaysPostponed{fl, ifp};
+            AstAlwaysPostponed* const newp = verificationLogicp(new AstAlwaysPostponed{fl, ifp});
             stmtsp->addNext(new AstAssign{fl, new AstVarRef{fl, varp, VAccess::WRITE},
                                           new AstConst{fl, AstConst::BitFalse{}}});
             m_modp->addStmtsp(newp);

@@ -322,7 +322,11 @@ class ActiveLatchCheckVisitor final : public VNVisitorConst {
         }
     }
     void visit(AstNodeIf* nodep) override {
-        if (nodep->isBoundsCheck() || nodep->isUnderAssertion()) {
+        if (nodep->isVerificationLogic()) return;
+        // A generated array bounds check is not user control flow either, but unlike
+        // assertion logic it wraps statements the user wrote unconditionally, so descend
+        // into it rather than skipping it - just without opening a branch.
+        if (nodep->isBoundsCheck()) {
             iterateChildrenConst(nodep);
             return;
         }
@@ -335,7 +339,13 @@ class ActiveLatchCheckVisitor final : public VNVisitorConst {
         m_graph.currentp(parentp);
     }
     //--------------------
-    void visit(AstNode* nodep) override { iterateChildrenConst(nodep); }
+    void visit(AstNode* nodep) override {
+        // Assertion logic is not synthesized, so it can neither leave a latch nor drive one
+        // of the user's signals on all paths.  A mark covers the whole generated subtree
+        // (see AstNode::isVerificationLogic), so skip it entirely.
+        if (nodep->isVerificationLogic()) return;
+        iterateChildrenConst(nodep);
+    }
 
 public:
     // CONSTRUCTORS

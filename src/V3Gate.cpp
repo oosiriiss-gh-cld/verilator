@@ -203,7 +203,7 @@ class GateBuildVisitor final : public VNVisitorConst {
     bool m_inStaticActive = false;  // Underneath static active
     bool m_inInitialActive = false;  // Underneath initial active
     bool m_inSenItem = false;  // Underneath AstSenItem; any varrefs are clocks
-    bool m_isUnderAssertion = false;  // Part of assertion statement
+    bool m_inVerificationLogic = false;  // Underneath compiler-generated assertion logic
 
     // METHODS
     void checkNode(AstNode* nodep) {
@@ -212,6 +212,17 @@ class GateBuildVisitor final : public VNVisitorConst {
             m_logicVertexp->clearReducibleAndDedupable("TimingControl");
             m_logicVertexp->setConsumed("TimingControl");
         }
+    }
+
+    // Descend, tracking whether we are inside logic Verilator generated to evaluate an
+    // assertion.  Such logic is not synthesized, so the signals it reads are not part of
+    // the design's reset structure (see AstNode::isVerificationLogic).  Tracking it here
+    // instead of per node type keeps it correct for whatever shape assertion lowering
+    // emits - a procedure, an 'if', or a bare assignment.
+    void iterateChildrenTrackVerification(AstNode* nodep) {
+        VL_RESTORER(m_inVerificationLogic);
+        m_inVerificationLogic |= nodep->isVerificationLogic();
+        iterateChildrenConst(nodep);
     }
 
     void iterateLogic(AstNode* nodep, bool slow = false, const char* nonReducibleReason = nullptr,
@@ -232,7 +243,7 @@ class GateBuildVisitor final : public VNVisitorConst {
         }
         if (consumeReason) m_logicVertexp->setConsumed(consumeReason);
         checkNode(nodep);
-        iterateChildrenConst(nodep);
+        iterateChildrenTrackVerification(nodep);
     }
 
     // VISITORS
@@ -271,10 +282,6 @@ class GateBuildVisitor final : public VNVisitorConst {
     }
     void visit(AstNodeProcedure* nodep) override {
         const bool slow = VN_IS(nodep, Initial) || VN_IS(nodep, Final);
-        VL_RESTORER(m_isUnderAssertion);
-        // Assertion lowering builds its own clocked procedures. They are not synthesized,
-        // so their reads must not be classified as sync/async reset usage (SYNCASYNCNET).
-        if (nodep->isUnderAssertion()) m_isUnderAssertion = true;
         iterateLogic(nodep, slow, nodep->isJustOneBodyStmt() ? nullptr : "Multiple Stmts");
     }
     void visit(AstCoverToggle* nodep) override {
@@ -284,18 +291,10 @@ class GateBuildVisitor final : public VNVisitorConst {
         VL_RESTORER(m_inSenItem);
         m_inSenItem = true;
         if (m_logicVertexp) {  // Already under logic, e.g.: AstEventControl
-            iterateChildrenConst(nodep);
+            iterateChildrenTrackVerification(nodep);
         } else {  // Standalone item, under a SenTree or an Active
             iterateLogic(nodep, false, nullptr, "senItem");
         }
-    }
-    void visit(AstNodeIf* nodep) override {
-        if (m_logicVertexp) checkNode(nodep);
-        // An immediate assertion is lowered in place, inside the user's own procedure,
-        // so there the marker sits on the generated 'if' rather than on the procedure.
-        VL_RESTORER(m_isUnderAssertion);
-        if (nodep->isUnderAssertion()) m_isUnderAssertion = true;
-        iterateChildrenConst(nodep);
     }
     void visit(AstNodeVarRef* nodep) override {
         if (!m_logicVertexp) return;
@@ -306,7 +305,7 @@ class GateBuildVisitor final : public VNVisitorConst {
         if (m_inSenItem) {
             vVtxp->setIsClock();
             vscp->user2(true);
-        } else if (m_inEdgeActive && nodep->access().isReadOnly() && !m_isUnderAssertion) {
+        } else if (m_inEdgeActive && nodep->access().isReadOnly() && !m_inVerificationLogic) {
             // For SYNCASYNCNET
             if (vscp->user2()) {
                 if (!vVtxp->rstAsyncNodep()) vVtxp->rstAsyncNodep(nodep);
@@ -324,13 +323,13 @@ class GateBuildVisitor final : public VNVisitorConst {
         UASSERT_OBJ(!(VN_IS(nodep->backp(), NodeAssign)
                       && VN_AS(nodep->backp(), NodeAssign)->lhsp() == nodep),
                     nodep, "Concat on LHS of assignment; V3Const should have deleted it");
-        iterateChildrenConst(nodep);
+        iterateChildrenTrackVerification(nodep);
     }
 
     //--------------------
     void visit(AstNode* nodep) override {
         if (m_logicVertexp) checkNode(nodep);
-        iterateChildrenConst(nodep);
+        iterateChildrenTrackVerification(nodep);
     }
 
     // CONSTRUCTORS

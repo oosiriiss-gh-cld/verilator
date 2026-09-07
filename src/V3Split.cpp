@@ -515,7 +515,8 @@ public:
             // V3Activate already moved it to a parent node.
             AstAlways* const alwaysp
                 = new AstAlways{m_origAlwaysp->fileline(), VAlwaysKwd::ALWAYS, nullptr, nullptr};
-            alwaysp->isUnderAssertion(m_origAlwaysp->isUnderAssertion());
+            // Built from scratch rather than cloned, so carry the provenance mark over
+            alwaysp->isVerificationLogic(m_origAlwaysp->isVerificationLogic());
             // Put a placeholder node into stmtp to track our position.
             // We'll strip these out after the blocks are fully cloned.
             AstSplitPlaceholder* const placeholderp = makePlaceholderp();
@@ -569,9 +570,8 @@ protected:
             // non-pure to separate from other pure statements.
             AstIf* const clonep = new AstIf{nodep->fileline(), nodep->condp()->cloneTree(true),
                                             if_placeholderp, else_placeholderp};
-            clonep->isBoundsCheck(nodep->isBoundsCheck());
-            clonep->isUnderAssertion(nodep->isUnderAssertion());
-            clonep->branchPred(nodep->branchPred());
+            // Built from scratch rather than cloned, so carry the provenance mark over
+            clonep->isVerificationLogic(nodep->isVerificationLogic());
             const AstIf* const origp = VN_CAST(nodep, If);
             if (origp) {
                 // Preserve pragmas from unique if's

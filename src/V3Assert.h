@@ -24,6 +24,21 @@
 
 //============================================================================
 
+// Mark 'nodep' as compiler-generated verification logic and return it, so it can be applied
+// inline where the node is built:
+//     modp->addStmtsp(verificationLogicp(new AstAlways{...}));
+// The rule for assertion lowering is: mark every procedure you create, and every statement
+// you inject into a procedure the user wrote.  Nodes nested below an already-marked node
+// inherit the mark from their position, so a helper shared between those two cases can mark
+// unconditionally - a redundant mark costs nothing.  Skipping a mark lets style checks that
+// reason about synthesized hardware structure (SYNCASYNCNET, LATCH) mistake checker logic for
+// user RTL.  See AstNode::isVerificationLogic.
+template <typename T_Node>
+T_Node* verificationLogicp(T_Node* nodep) {
+    nodep->isVerificationLogic(true);
+    return nodep;
+}
+
 class V3AssertCommon final {
 public:
     static void collectDefaultDisable(AstNetlist* nodep) VL_MT_DISABLED;
