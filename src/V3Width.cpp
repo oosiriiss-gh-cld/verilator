@@ -1115,6 +1115,62 @@ class WidthVisitor final : public VNVisitor {
         }
     }
 
+    void selClipUnderflow(AstSel* nodep, bool isWriteSelect) {
+        // A select may reach below bit 0 of the object, e.g. x[2:-2].  Those
+        // bits read as zero and are dropped on writes, so clip the select and
+        // realign the bits that remain.
+        FileLine* const fl = nodep->fileline();
+        const int width = nodep->widthConst();
+        const int clip = -nodep->lsbConst();
+        const int newWidth = width - clip;
+        // A narrowed lvalue needs the rhs narrowed to match, so the assignment
+        // has to be directly above
+        AstNodeAssign* const assignp = VN_CAST(nodep->backp(), NodeAssign);
+        if (isWriteSelect && newWidth > 0 && !(assignp && assignp->lhsp() == nodep)) {
+            nodep->v3warn(E_UNSUPPORTED,
+                          "Unsupported: Select below the LSB of the object written other "
+                          "than by a whole assignment");
+            return;
+        }
+        // The select was warned about with the original indexes, so the
+        // rewritten one must not warn again
+        FileLine* const clippedFl = new FileLine{fl};
+        clippedFl->warnOff(V3ErrorCode::SELRANGE, true);
+        nodep->fileline(clippedFl);
+        nodep->didWidth(true);
+        AstNodeExpr* const oldLsbp = nodep->lsbp();
+        if (newWidth <= 0) {  // Nothing of the select overlaps the object
+            if (isWriteSelect) {
+                // Move it past the top, where the existing out of range
+                // handling makes the write a no-op
+                oldLsbp->replaceWith(
+                    new AstConst{clippedFl, static_cast<uint32_t>(nodep->fromp()->width())});
+                VL_DO_DANGLING(pushDeletep(oldLsbp), oldLsbp);
+                return;
+            }
+            AstNode* const oldp = nodep;
+            nodep->replaceWith(new AstConst{fl, AstConst::WidthedValue{}, width, 0});
+            VL_DO_DANGLING(pushDeletep(oldp), oldp);
+            return;
+        }
+        oldLsbp->replaceWith(new AstConst{clippedFl, 0});
+        VL_DO_DANGLING(pushDeletep(oldLsbp), oldLsbp);
+        nodep->dtypeSetLogicSized(newWidth, VSigning::UNSIGNED);
+        nodep->widthConst(newWidth);
+        VNRelinker handle;
+        if (isWriteSelect) {
+            // Can't pad an lvalue, so take the matching bits of the rhs instead
+            AstNodeExpr* const rhsp = assignp->rhsp()->unlinkFrBack(&handle);
+            handle.relink(new AstSel{fl, rhsp, clip, newWidth});
+            return;
+        }
+        nodep->unlinkFrBack(&handle);
+        AstNodeExpr* const newp
+            = new AstConcat{fl, nodep, new AstConst{fl, AstConst::WidthedValue{}, clip, 0}};
+        newp->dtypeSetLogicSized(width, VSigning::UNSIGNED);
+        handle.relink(newp);
+    }
+
     void visit(AstSel* nodep) override {
         // Signed: always unsigned; Real: Not allowed
         // LSB is self-determined (IEEE 2012 11.5.1)
@@ -1240,6 +1296,23 @@ class WidthVisitor final : public VNVisitor {
                         extendTo, extendTo, nodep->fromp()->dtypep()->numeric());
                     widthCheckSized(nodep, "errorless...", nodep->fromp(), subDTypep, EXTEND_EXP,
                                     false /*noerror*/);
+                }
+            }
+            if (VN_IS(nodep->lsbp(), Const) && nodep->lsbConst() < 0) {
+                // As above, but the index is normalized to zero, so a select
+                // reaching below the object cannot simply be extended
+                if (m_doGenerate) {
+                    UINFO(5, "Selection index out of range inside generate");
+                } else {
+                    if (!inParameterizedTemplate) {
+                        nodep->v3warn(SELRANGE, "Selection index out of range: "
+                                                    << nodep->msbConst() << ":"
+                                                    << nodep->lsbConst() << " outside " << frommsb
+                                                    << ":" << fromlsb);
+                        UINFO(1, "    Related node: " << nodep);
+                    }
+                    selClipUnderflow(nodep, isWriteSelect);
+                    return;
                 }
             }
             // iterate FINAL is two blocks above

@@ -1,0 +1,6 @@
+%Error-UNSUPPORTED: t/t_sel_neg_lsb_unsup.v:14:7: Unsupported: Select below the LSB of the object written other than by a whole assignment
+                                                : ... note: In instance 't'
+   14 |     {x[2:-2], z} = 7'b0100111;
+      |       ^
+                    ... For error description see https://verilator.org/warn/UNSUPPORTED?v=latest
+%Error: Exiting due to
