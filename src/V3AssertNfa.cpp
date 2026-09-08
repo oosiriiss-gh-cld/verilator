@@ -2017,7 +2017,7 @@ class SvaNfaLowering final {
             updateBodyp = new AstIf{c.flp, clearCondp, clearCountp, updateBodyp};
 
             m_modp->addStmtsp(newAssertAlways(c.flp, VAlwaysKwd::ALWAYS,
-                                            c.senTreep->cloneTree(false), updateBodyp));
+                                              c.senTreep->cloneTree(false), updateBodyp));
         }
     }
 
