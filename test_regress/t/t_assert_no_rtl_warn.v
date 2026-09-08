@@ -74,8 +74,10 @@ endmodule
 
 // 'unique if' is wrapped by V3Assert in a violation check, and the latch
 // detector must look through that wrapper (it did so via isBoundsCheck before
-// the flag existed; behavior is unchanged).  Covers: V3Active's
-// ActiveLatchCheckVisitor.  Removing it: LATCH on 'o'.
+// the flag existed; behavior is unchanged).  V3Const inverts and merges that
+// wrapper on the way, so the flag must survive the rebuilt 'if' too.  Covers:
+// V3Active's ActiveLatchCheckVisitor and V3Const's flag copy.  Removing
+// either: LATCH on 'o'.
 module sub_latch_unique_if (
     input a,
     output logic o
