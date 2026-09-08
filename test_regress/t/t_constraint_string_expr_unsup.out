@@ -1,0 +1,6 @@
+%Error-UNSUPPORTED: t/t_constraint_string_expr_unsup.v:16:33: Unsupported expression inside constraint
+                                                            : ... note: In instance 't'
+   16 |   constraint c {(sel ? lo : hi) == "bb";}
+      |                                 ^~
+                    ... For error description see https://verilator.org/warn/UNSUPPORTED?v=latest
+%Error: Exiting due to
