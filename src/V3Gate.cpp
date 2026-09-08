@@ -272,7 +272,8 @@ class GateBuildVisitor final : public VNVisitorConst {
     void visit(AstNodeProcedure* nodep) override {
         const bool slow = VN_IS(nodep, Initial) || VN_IS(nodep, Final);
         VL_RESTORER(m_isUnderAssertion);
-        if (nodep->isUnderAssertion()) m_isUnderAssertion = true;
+        const AstAlways* const alwaysp = VN_CAST(nodep, Always);
+        if (alwaysp && alwaysp->isUnderAssertion()) m_isUnderAssertion = true;
         iterateLogic(nodep, slow, nodep->isJustOneBodyStmt() ? nullptr : "Multiple Stmts");
     }
     void visit(AstCoverToggle* nodep) override {

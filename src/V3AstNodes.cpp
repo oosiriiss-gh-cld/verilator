@@ -304,9 +304,11 @@ void AstAddrOfCFunc::dump(std::ostream& str) const {
 void AstAlways::dump(std::ostream& str) const {
     Super::dump(str);
     if (keyword() != VAlwaysKwd::ALWAYS) str << " [" << keyword().ascii() << "]";
+    if (isUnderAssertion()) str << " [ASSERT]";
 }
 void AstAlways::dumpJson(std::ostream& str) const {
     dumpJsonStr(str, "keyword", keyword().ascii());
+    dumpJsonBoolFuncIf(str, isUnderAssertion);
     dumpJsonGen(str);
 }
 const char* AstAnd::widthMismatch() const VL_MT_STABLE {
@@ -2742,12 +2744,10 @@ void AstNodeProcedure::dump(std::ostream& str) const {
     Super::dump(str);
     if (isSuspendable()) str << " [SUSP]";
     if (needProcess()) str << " [NPRC]";
-    if (isUnderAssertion()) str << " [ASSERT]";
 }
 void AstNodeProcedure::dumpJson(std::ostream& str) const {
     dumpJsonBoolFuncIf(str, isSuspendable);
     dumpJsonBoolFuncIf(str, needProcess);
-    dumpJsonBoolFuncIf(str, isUnderAssertion);
     dumpJsonGen(str);
 }
 const char* AstNodeQuadop::broken() const {

@@ -397,13 +397,11 @@ class AstNodeProcedure VL_NOT_FINAL : public AstNode {
     // @astgen op2 := stmtsp : List[AstNode] // Note: op1 is used in some sub-types only
     bool m_suspendable : 1;  // Is suspendable by a Delay, EventControl, etc.
     bool m_needProcess : 1;  // Uses VlProcess
-    bool m_isUnderAssertion : 1;  // Body is assertion support logic
 protected:
     AstNodeProcedure(VNType t, FileLine* fl, AstNode* stmtsp)
         : AstNode{t, fl} {
         m_needProcess = false;
         m_suspendable = false;
-        m_isUnderAssertion = false;
         addStmtsp(stmtsp);
     }
 
@@ -417,8 +415,6 @@ public:
     void setSuspendable() { m_suspendable = true; }
     bool needProcess() const { return m_needProcess; }
     void setNeedProcess() { m_needProcess = true; }
-    bool isUnderAssertion() const { return m_isUnderAssertion; }
-    void isUnderAssertion(bool flag) { m_isUnderAssertion = flag; }
 };
 class AstNodeRange VL_NOT_FINAL : public AstNode {
     // A range, sized or unsized
@@ -3146,6 +3142,7 @@ public:
 class AstAlways final : public AstNodeProcedure {
     // @astgen op1 := sentreep : Optional[AstSenTree] // Sensitivity list iff clocked
     const VAlwaysKwd m_keyword;
+    bool m_isUnderAssertion = false;  // Body is assertion support logic
 
 public:
     AstAlways(FileLine* fl, VAlwaysKwd keyword, AstSenTree* sentreep, AstNode* stmtsp = nullptr)
@@ -3159,6 +3156,8 @@ public:
     void dump(std::ostream& str) const override;
     void dumpJson(std::ostream& str) const override;
     VAlwaysKwd keyword() const { return m_keyword; }
+    bool isUnderAssertion() const { return m_isUnderAssertion; }
+    void isUnderAssertion(bool flag) { m_isUnderAssertion = flag; }
 };
 class AstAlwaysObserved final : public AstNodeProcedure {
     // Like always but Observed scheduling region
