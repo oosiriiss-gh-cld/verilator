@@ -151,7 +151,8 @@ class AstNodeIf VL_NOT_FINAL : public AstNodeStmt {
     // @astgen op2 := thensp : List[AstNode]
     // @astgen op3 := elsesp : List[AstNode]
     VBranchPred m_branchPred;  // Branch prediction as taken/untaken?
-    bool m_isBoundsCheck;  // True if this if node is for assertion/bounds checking
+    bool m_isBoundsCheck;  // True if this if node is for bounds checking
+    bool m_isUnderAssertion;  // Node is part of assertion node tree
 protected:
     AstNodeIf(VNType t, FileLine* fl, AstNodeExpr* condp, AstNode* thensp, AstNode* elsesp)
         : AstNodeStmt{t, fl} {
@@ -159,6 +160,7 @@ protected:
         addThensp(thensp);
         addElsesp(elsesp);
         isBoundsCheck(false);
+        isUnderAssertion(false);
     }
 
 public:
@@ -173,6 +175,8 @@ public:
     VBranchPred branchPred() const { return m_branchPred; }
     void isBoundsCheck(bool flag) { m_isBoundsCheck = flag; }
     bool isBoundsCheck() const { return m_isBoundsCheck; }
+    void isUnderAssertion(bool flag) { m_isUnderAssertion = flag; }
+    bool isUnderAssertion() const { return m_isUnderAssertion; }
 };
 class AstNodeReadWriteMem VL_NOT_FINAL : public AstNodeStmt {
     // @astgen op1 := filenamep : AstNodeExpr

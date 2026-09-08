@@ -2683,10 +2683,12 @@ void AstNodeFile::dumpJson(std::ostream& str) const { dumpJsonGen(str); }
 void AstNodeIf::dump(std::ostream& str) const {
     Super::dump(str);
     if (isBoundsCheck()) str << " [BOUNDS]";
+    if (isUnderAssertion()) str << " [ASSERT]";
     if (!branchPred().unknown()) str << " [" << branchPred().asciiShort() << "]";
 }
 void AstNodeIf::dumpJson(std::ostream& str) const {
     dumpJsonBoolIf(str, "isBoundsCheck", isBoundsCheck());
+    dumpJsonBoolIf(str, "isUnderAssertion", isUnderAssertion());
     dumpJsonStr(str, "branchPred", branchPred().ascii());
     dumpJsonGen(str);
 }
@@ -2740,10 +2742,12 @@ void AstNodeProcedure::dump(std::ostream& str) const {
     Super::dump(str);
     if (isSuspendable()) str << " [SUSP]";
     if (needProcess()) str << " [NPRC]";
+    if (isUnderAssertion()) str << " [ASSERT]";
 }
 void AstNodeProcedure::dumpJson(std::ostream& str) const {
     dumpJsonBoolFuncIf(str, isSuspendable);
     dumpJsonBoolFuncIf(str, needProcess);
+    dumpJsonBoolFuncIf(str, isUnderAssertion);
     dumpJsonGen(str);
 }
 const char* AstNodeQuadop::broken() const {

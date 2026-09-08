@@ -322,17 +322,17 @@ class ActiveLatchCheckVisitor final : public VNVisitorConst {
         }
     }
     void visit(AstNodeIf* nodep) override {
-        if (!nodep->isBoundsCheck()) {
-            LatchDetectGraphVertex* const parentp = m_graph.currentp();
-            LatchDetectGraphVertex* const branchp = m_graph.addPathVertex(parentp, "BRANCH", true);
-            m_graph.addPathVertex(branchp, "IF");
-            iterateAndNextConstNull(nodep->thensp());
-            m_graph.addPathVertex(branchp, "ELSE");
-            iterateAndNextConstNull(nodep->elsesp());
-            m_graph.currentp(parentp);
-        } else {
+        if (nodep->isBoundsCheck() || nodep->isUnderAssertion()) {
             iterateChildrenConst(nodep);
+            return;
         }
+        LatchDetectGraphVertex* const parentp = m_graph.currentp();
+        LatchDetectGraphVertex* const branchp = m_graph.addPathVertex(parentp, "BRANCH", true);
+        m_graph.addPathVertex(branchp, "IF");
+        iterateAndNextConstNull(nodep->thensp());
+        m_graph.addPathVertex(branchp, "ELSE");
+        iterateAndNextConstNull(nodep->elsesp());
+        m_graph.currentp(parentp);
     }
     //--------------------
     void visit(AstNode* nodep) override { iterateChildrenConst(nodep); }

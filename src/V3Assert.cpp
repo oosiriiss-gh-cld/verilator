@@ -200,6 +200,7 @@ class AssertDeFutureVisitor final : public VNVisitor {
             AstSenTree* const sentreep = m_futurep->sentreep();
             AstAlways* const alwaysp = new AstAlways{nodep->fileline(), VAlwaysKwd::ALWAYS,
                                                      sentreep->cloneTree(false), nullptr};
+            alwaysp->isUnderAssertion(true);
             m_modp->addStmtsp(alwaysp);
             outvarp = new AstVar{nodep->fileline(), VVarType::MODULETEMP,
                                  "__Vnotfuture" + cvtToStr(m_pastNum) + "_" + nodep->name(),
@@ -457,7 +458,7 @@ class AssertVisitor final : public VNVisitor {
 
         AstNodeExpr* const condp = assertOnCond(fl, type, directiveType);
         AstIf* const newp = new AstIf{fl, condp, bodyp};
-        newp->isBoundsCheck(true);  // To avoid LATCH warning
+        newp->isUnderAssertion(true);
         newp->user2(true);  // Mark as an assertOn() check
         return newp;
     }
@@ -468,7 +469,7 @@ class AssertVisitor final : public VNVisitor {
         FileLine* const fl = bodyp->fileline();
         AstNodeExpr* const condp = assertPassOnCond(fl, type, directiveType, vacuous);
         AstNodeIf* const newp = new AstIf{fl, condp, bodyp};
-        newp->isBoundsCheck(true);  // To avoid LATCH warning
+        newp->isUnderAssertion(true);
         newp->user1(true);  // Don't assert/cover this if
         newp->user2(true);  // Mark as an assertOn() check
         return newp;
@@ -480,7 +481,7 @@ class AssertVisitor final : public VNVisitor {
         FileLine* const fl = bodyp->fileline();
         AstNodeExpr* const condp = assertFailOnCond(fl, type, directiveType);
         AstNodeIf* const newp = new AstIf{fl, condp, bodyp};
-        newp->isBoundsCheck(true);  // To avoid LATCH warning
+        newp->isUnderAssertion(true);
         newp->user1(true);  // Don't assert/cover this if
         newp->user2(true);  // Mark as an assertOn() check
         return newp;
@@ -492,7 +493,7 @@ class AssertVisitor final : public VNVisitor {
         // It's more LIKELY that we'll take the nullptr if clause
         // than the sim-killing else clause:
         ifp->branchPred(VBranchPred::BP_LIKELY);
-        ifp->isBoundsCheck(true);  // To avoid LATCH warning
+        ifp->isUnderAssertion(true);
         return ifp;
     }
 
@@ -569,6 +570,7 @@ class AssertVisitor final : public VNVisitor {
             FileLine* const flp = exprp->fileline();
             // Create the always block that computes the delayed values
             alwayspr = new AstAlways{flp, VAlwaysKwd::ALWAYS, senTreep, nullptr};
+            alwayspr->isUnderAssertion(true);
             m_modp->addStmtsp(alwayspr);
             // Create the once-delayed variable
             const std::string name = "_Vpast_" + cvtToStr(m_modPastNum++) + "_1";
@@ -770,7 +772,11 @@ class AssertVisitor final : public VNVisitor {
         if (disablep) bodysp = new AstIf{flp, new AstLogNot{flp, disablep}, bodysp};
         // Add assertOn check last, for better combining
         if (!seqEvent) bodysp = newIfAssertOn(bodysp, nodep->directive(), nodep->userType());
-        if (sentreep) bodysp = new AstAlways{flp, VAlwaysKwd::ALWAYS, sentreep, bodysp};
+        if (sentreep) {
+            AstAlways* const alwaysp = new AstAlways{flp, VAlwaysKwd::ALWAYS, sentreep, bodysp};
+            alwaysp->isUnderAssertion(true);
+            bodysp = alwaysp;
+        }
 
         if (passsp && !passsp->backp()) VL_DO_DANGLING(pushDeletep(passsp), passsp);
         if (failsp && !failsp->backp()) VL_DO_DANGLING(pushDeletep(failsp), failsp);
@@ -854,7 +860,7 @@ class AssertVisitor final : public VNVisitor {
                                 newFireAssert(nodep, VAssertDirectiveType::VIOLATION_IF,
                                               assertType, "'unique if' statement violated"),
                                 newifp};
-                checkifp->isBoundsCheck(true);  // To avoid LATCH warning
+                checkifp->isUnderAssertion(true);
                 checkifp->branchPred(VBranchPred::BP_UNLIKELY);
                 nodep->replaceWith(checkifp);
                 VL_DO_DANGLING(pushDeletep(nodep), nodep);
@@ -1049,7 +1055,7 @@ class AssertVisitor final : public VNVisitor {
                                       pragmaStr + ", but multiple matches found" + valFmt,
                                       valFmt.empty() ? nullptr : exprp->cloneTreePure(false)));
                     ohotIfp->addThensp(zeroIfp);
-                    ohotIfp->isBoundsCheck(true);  // To avoid LATCH warning
+                    ohotIfp->isUnderAssertion(true);
                     ohotIfp->branchPred(VBranchPred::BP_UNLIKELY);
                     nodep->addNotParallelp(ohotIfp);
                 }
@@ -1214,7 +1220,7 @@ class AssertVisitor final : public VNVisitor {
                               new AstEq{fl, new AstConst{fl, monNum},
                                         newMonitorNumVarRefp(nodep, VAccess::READ)}},
                 stmtsp};
-            ifp->isBoundsCheck(true);  // To avoid LATCH warning
+            ifp->isUnderAssertion(true);
             ifp->branchPred(VBranchPred::BP_UNLIKELY);
             AstNode* const newp = new AstAlways{fl, VAlwaysKwd::ALWAYS, monSenTree, ifp};
             m_modp->addStmtsp(newp);
@@ -1233,7 +1239,7 @@ class AssertVisitor final : public VNVisitor {
             // Add "always_comb if (__Vstrobe) begin $display(...); __Vstrobe = '0; end"
             AstNode* const stmtsp = nodep;
             AstIf* const ifp = new AstIf{fl, new AstVarRef{fl, varp, VAccess::READ}, stmtsp};
-            ifp->isBoundsCheck(true);  // To avoid LATCH warning
+            ifp->isUnderAssertion(true);
             ifp->branchPred(VBranchPred::BP_UNLIKELY);
             AstNode* const newp = new AstAlwaysPostponed{fl, ifp};
             stmtsp->addNext(new AstAssign{fl, new AstVarRef{fl, varp, VAccess::WRITE},
