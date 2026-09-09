@@ -2716,8 +2716,32 @@ class AssertNfaVisitor final : public VNVisitor {
 
     static AstNodeExpr* getSequenceBodyExprp(const AstSequence* seqp) {
         AstNode* bodyp = seqp->stmtsp();
-        while (bodyp && VN_IS(bodyp, Var)) bodyp = bodyp->nextp();
+        // V3LinkParse emits InitialStaticStmt for sequence-local variable
+        // initialisers; the InitialAutomaticStmt variant only appears for
+        // task/function-scope automatic lifetime, not sequences.
+        while (bodyp
+               && (VN_IS(bodyp, Var) || VN_IS(bodyp, InitialStaticStmt)
+                   || VN_IS(bodyp, InitialAutomaticStmt))) {  // LCOV_EXCL_LINE
+            bodyp = bodyp->nextp();
+        }
         return VN_CAST(bodyp, NodeExpr);
+    }
+
+    std::unordered_map<const AstVar*, AstVar*> promoteAssertionLocals(const AstNodeFTask* declp) {
+        // Promote property/sequence-local variables to module-level temps (IEEE 16.10).
+        std::unordered_map<const AstVar*, AstVar*> localVarMap;
+        for (AstNode* stmtp = declp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
+            if (AstVar* const varp = VN_CAST(stmtp, Var)) {
+                if (!varp->isIO()) {
+                    AstVar* const newVarp = new AstVar{varp->fileline(), VVarType::MODULETEMP,
+                                                       m_propVarNames.get(varp), varp->dtypep()};
+                    newVarp->lifetime(VLifetime::STATIC_EXPLICIT);
+                    m_modp->addStmtsp(newVarp);
+                    localVarMap[varp] = newVarp;
+                }
+            }
+        }
+        return localVarMap;
     }
 
     static AstPropSpec* getPropertySpecp(const AstProperty* propp) {
@@ -2758,20 +2782,8 @@ class AssertNfaVisitor final : public VNVisitor {
             portMap[tconnect.first] = tconnect.second->exprp();
         }
 
-        // Promote property-local variables to module-level temps (IEEE 16.10).
-        std::unordered_map<const AstVar*, AstVar*> localVarMap;
-        for (AstNode* stmtp = propyp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
-            if (AstVar* const varp = VN_CAST(stmtp, Var)) {
-                if (!varp->isIO()) {
-                    const string newName = m_propVarNames.get(varp);
-                    AstVar* const newVarp = new AstVar{varp->fileline(), VVarType::MODULETEMP,
-                                                       newName, varp->dtypep()};
-                    newVarp->lifetime(VLifetime::STATIC_EXPLICIT);
-                    m_modp->addStmtsp(newVarp);
-                    localVarMap[varp] = newVarp;
-                }
-            }
-        }
+        const std::unordered_map<const AstVar*, AstVar*> localVarMap
+            = promoteAssertionLocals(propyp);
 
         propSpecp->foreach([&](AstVarRef* refp) {
             const auto portIt = portMap.find(refp->varp());
@@ -2823,13 +2835,18 @@ class AssertNfaVisitor final : public VNVisitor {
         for (const auto& tconnect : tconnects) {
             portMap[tconnect.first] = tconnect.second->exprp();
         }
+        const std::unordered_map<const AstVar*, AstVar*> localVarMap
+            = promoteAssertionLocals(seqp);
         clonedp->foreach([&](AstVarRef* refp) {
             const auto it = portMap.find(refp->varp());
             if (it != portMap.end()) {
                 refp->replaceWith(it->second->cloneTree(false));
                 VL_DO_DANGLING(pushDeletep(refp), refp);
+                return;
             }
-        });
+            const auto localIt = localVarMap.find(refp->varp());
+            if (localIt != localVarMap.end()) refp->varp(localIt->second);
+        });  // LCOV_EXCL_LINE -- gcov attributes lambda's implicit return to `})`
         for (const auto& tconnect : tconnects) {
             pushDeletep(tconnect.second->exprp()->unlinkFrBack());
         }

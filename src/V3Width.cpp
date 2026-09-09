@@ -7403,6 +7403,9 @@ class WidthVisitor final : public VNVisitor {
                 userIterate(stmtp, nullptr);
             } else if (VN_IS(stmtp, NodeExpr)) {
                 iterateCheckSelf(nodep, "SeqBody", stmtp, SELF, BOTH);
+            } else if (VN_IS(stmtp, InitialStaticStmt) || VN_IS(stmtp, InitialAutomaticStmt)) {
+                // Sequence-local variable initialization -- iterate this node only
+                userIterate(stmtp, nullptr);
             } else {
                 stmtp->v3fatalSrc("Invalid statement under AstSequence");
             }
