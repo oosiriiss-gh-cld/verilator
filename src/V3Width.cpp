@@ -1171,6 +1171,60 @@ class WidthVisitor final : public VNVisitor {
         handle.relink(newp);
     }
 
+    bool selIsLValue(AstSel* nodep) {
+        // Selects of e.g. a dynamic array have no variable reference to tell
+        // the access from, so also look for an assignment above
+        const AstNode* underp = nodep;
+        while (const AstNodeExpr* const upp = VN_CAST(underp->backp(), NodeExpr)) underp = upp;
+        const AstNodeAssign* const assignp = VN_CAST(underp->backp(), NodeAssign);
+        return assignp && assignp->lhsp() == underp;
+    }
+
+    AstNodeExpr* selClipNegp(FileLine* fl, AstNodeExpr* lsbp) {
+        // True when the select reaches below bit 0 of the object
+        return new AstLtS{fl, lsbp->cloneTreePure(false),
+                          new AstConst{fl, AstConst::Signed32{}, 0}};
+    }
+
+    bool selClipUnderflowRuntime(AstSel* nodep, bool isWriteSelect) {
+        // As selClipUnderflow, but the index isn't known until runtime, so
+        // the select can't be narrowed
+        if (!nodep->lsbp()->isSigned()) return false;  // Can't reach below the object
+        // A foldable index is left to the constant case above, and the index
+        // is evaluated more than once below
+        if (!nodep->lsbp()->exists([](AstNodeVarRef*) { return true; })) return false;
+        if (nodep->lsbp()->exists([](AstNode* np) { return !np->isPure(); })) return false;
+        // Nothing of a one bit select is left, which the out of range
+        // handling in V3Unknown already covers
+        if (!isWriteSelect && nodep->widthConst() == 1) return false;
+        FileLine* const fl = nodep->fileline();
+        const int width = nodep->widthConst();
+        nodep->didWidth(true);
+        AstNodeExpr* const lsbp = nodep->lsbp()->unlinkFrBack();
+        if (isWriteSelect) {
+            // Can't narrow an lvalue, so as selClipUnderflow move the select
+            // past the top, where the existing out of range handling makes
+            // the write a no-op
+            nodep->lsbp(new AstCond{
+                fl, selClipNegp(fl, lsbp),
+                new AstConst{fl, static_cast<uint32_t>(nodep->fromp()->width())}, lsbp});
+        } else {
+            // Realign the bits that are left with a shift
+            AstNodeExpr* const shiftp = new AstCond{fl, selClipNegp(fl, lsbp),
+                                                    new AstNegate{fl, lsbp->cloneTreePure(false)},
+                                                    new AstConst{fl, AstConst::Signed32{}, 0}};
+            nodep->lsbp(new AstAdd{fl, lsbp, shiftp->cloneTreePure(false)});
+            VNRelinker handle;
+            nodep->unlinkFrBack(&handle);
+            AstShiftL* const newp = new AstShiftL{fl, nodep, shiftp, width};
+            newp->dtypeSetLogicSized(width, VSigning::UNSIGNED);
+            handle.relink(newp);
+            userIterateAndNext(newp->rhsp(), WidthVP{SELF, BOTH}.p());
+        }
+        userIterateAndNext(nodep->lsbp(), WidthVP{SELF, BOTH}.p());
+        return true;
+    }
+
     void visit(AstSel* nodep) override {
         // Signed: always unsigned; Real: Not allowed
         // LSB is self-determined (IEEE 2012 11.5.1)
@@ -1311,9 +1365,14 @@ class WidthVisitor final : public VNVisitor {
                                                     << ":" << fromlsb);
                         UINFO(1, "    Related node: " << nodep);
                     }
-                    selClipUnderflow(nodep, isWriteSelect);
+                    selClipUnderflow(nodep, isWriteSelect || selIsLValue(nodep));
                     return;
                 }
+            } else if (!VN_IS(nodep->lsbp(), Const) && !m_doGenerate && !inParameterizedTemplate) {
+                // The index may still go below the object at runtime, e.g.
+                // x[i-:4] with i of 1
+                // The index is already clipped, so must not be truncated below
+                if (selClipUnderflowRuntime(nodep, isWriteSelect || selIsLValue(nodep))) return;
             }
             // iterate FINAL is two blocks above
             //

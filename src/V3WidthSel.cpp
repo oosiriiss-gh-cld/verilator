@@ -112,6 +112,12 @@ class WidthSelVisitor final : public VNVisitor {
         return FromData(errp, ddtypep, fromRange);
     }
 
+    AstNodeExpr* newSubConstp(AstNodeExpr* underp, int32_t num) {
+        // The index keeps its sign, so a select below the object stays
+        // negative rather than wrapping, see V3Width's selClipUnderflow
+        if (underp->isSigned()) return new AstConst{underp->fileline(), AstConst::Signed32{}, num};
+        return new AstConst{underp->fileline(), AstConst::Unsized32{}, num};
+    }
     AstNodeExpr* newSubNeg(AstNodeExpr* lhsp, int32_t rhs) {
         // Return lhs-rhs, but if rhs is negative use an add, so we won't
         // have to deal with signed math and related 32bit sign extension problems
@@ -124,16 +130,12 @@ class WidthSelVisitor final : public VNVisitor {
             num.isSigned(lhsp->isSigned());
             return new AstConst{lhsp->fileline(), num};
         } else if (rhs > 0) {
-            AstNodeExpr* const newp
-                = new AstSub{lhsp->fileline(), lhsp,
-                             new AstConst(lhsp->fileline(), AstConst::Unsized32{}, rhs)};
+            AstNodeExpr* const newp = new AstSub{lhsp->fileline(), lhsp, newSubConstp(lhsp, rhs)};
             // We must make sure sub gets sign of original value, not from the constant
             newp->dtypeFrom(lhsp);
             return newp;
         } else {  // rhs < 0;
-            AstNodeExpr* const newp
-                = new AstAdd{lhsp->fileline(), lhsp,
-                             new AstConst(lhsp->fileline(), AstConst::Unsized32{}, -rhs)};
+            AstNodeExpr* const newp = new AstAdd{lhsp->fileline(), lhsp, newSubConstp(lhsp, -rhs)};
             // We must make sure sub gets sign of original value, not from the constant
             newp->dtypeFrom(lhsp);
             return newp;
@@ -142,8 +144,7 @@ class WidthSelVisitor final : public VNVisitor {
     AstNodeExpr* newSubNeg(int32_t lhs, AstNodeExpr* rhsp) {
         // Return lhs-rhs
         // We must make sure sub gets sign of original value
-        AstNodeExpr* const newp = new AstSub{
-            rhsp->fileline(), new AstConst(rhsp->fileline(), AstConst::Unsized32{}, lhs), rhsp};
+        AstNodeExpr* const newp = new AstSub{rhsp->fileline(), newSubConstp(rhsp, lhs), rhsp};
         newp->dtypeFrom(rhsp);  // Important as AstSub default is lhs's sign
         return newp;
     }
