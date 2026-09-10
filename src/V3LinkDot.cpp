@@ -3479,6 +3479,13 @@ class LinkDotResolveVisitor final : public VNVisitor {
         }
         return isParamedClassRefDType(nodep);
     }
+    // True if this '::' segment cannot be resolved until V3Param specialized it
+    bool deferParamedRef(const AstClassOrPackageRef* refp) {
+        const AstClass* const clsp = VN_CAST(refp->classOrPackageNodep(), Class);
+        if (clsp && clsp->hasGParam()) return true;
+        if (m_statep->forPrimary() && isParamedClassRef(refp)) return true;
+        return false;
+    }
     VSymEnt* getThisClassSymp() {
         VSymEnt* classSymp = m_ds.m_dotSymp;
         while (classSymp && !VN_IS(classSymp->nodep(), Class)) {
@@ -3650,6 +3657,34 @@ class LinkDotResolveVisitor final : public VNVisitor {
         m_curSymp = symp;
         m_ds.init(m_curSymp);
         iterateNull(nodep);
+    }
+    // Resolves all parent classes and packages in a nested "x::y::z" type chain.
+    // Returns the last reference of the chain, with m_ds pointing at its parent scope,
+    // or nullptr if the chain is unresolved or cannot be resolved until after V3Param
+    AstClassOrPackageRef* resolveNestedTypes(AstDot* dotp) {
+        UASSERT_OBJ(dotp->colon(), dotp, "Dot should be '::' during scope resolution");
+        UASSERT_OBJ(VN_IS(dotp->lhsp(), Dot) || VN_IS(dotp->lhsp(), ClassOrPackageRef), dotp,
+                    "Dot's LHS should be nested parent type or class/package reference");
+        UASSERT_OBJ(VN_IS(dotp->rhsp(), ClassOrPackageRef), dotp,
+                    "Dot's RHS should be class/package reference");
+        AstClassOrPackageRef* const parentp = VN_IS(dotp->lhsp(), Dot)
+                                                  ? resolveNestedTypes(VN_AS(dotp->lhsp(), Dot))
+                                                  : VN_AS(dotp->lhsp(), ClassOrPackageRef);
+        // Couldn't resolve parent scope, error already reported
+        if (!parentp) return nullptr;
+        // Resolves, links parameters, and reports an unknown name or a parameterized
+        // parent referenced without '#()'.  Searches enclosing scopes only for the
+        // first segment, as m_dotPos is DP_PACKAGE for all later ones
+        iterate(parentp);
+        if (!parentp->classOrPackageNodep()) return nullptr;
+        // Parent awaiting specialization, retry the whole chain after V3Param
+        if (deferParamedRef(parentp)) return nullptr;
+        AstNodeModule* const parentModp = parentp->classOrPackageSkipp();
+        // Not a class/package yet, e.g. an unspecialized type parameter
+        if (!parentModp) return nullptr;
+        m_ds.m_dotSymp = m_statep->getNodeSym(parentModp);
+        m_ds.m_dotPos = DP_PACKAGE;
+        return VN_AS(dotp->rhsp(), ClassOrPackageRef);
     }
     static const AstNodeDType* getExprDTypep(const AstNodeExpr* selp) {
         while (const AstNodePreSel* const sp = VN_CAST(selp, NodePreSel)) selp = sp->fromp();
@@ -6064,49 +6099,47 @@ class LinkDotResolveVisitor final : public VNVisitor {
         LINKDOT_VISIT_START();
         UINFO(5, indent() << "visit " << nodep);
         if (AstNode* const cpackagep = nodep->classOrPackageOpp()) {
-            if (AstClassOrPackageRef* const cpackagerefp = VN_CAST(cpackagep, ClassOrPackageRef)) {
-                iterate(cpackagerefp);
-                const AstClass* const clsp = VN_CAST(cpackagerefp->classOrPackageNodep(), Class);
-                if (clsp && clsp->hasGParam()) {
-                    // Unable to link before the instantiation of parameter classes.
-                    // The class reference node still has to be visited now to later link
-                    // parameters.
-                    iterate(cpackagep);
-                    return;
-                }
-                // Defer non-typedef references through typedef aliases of parameterized classes.
-                if (m_statep->forPrimary() && !VN_IS(nodep->backp(), Typedef)
-                    && isParamedClassRef(cpackagerefp)) {
-                    iterate(cpackagep);
-                    return;
-                }
+            VL_RESTORER_COPY(m_ds);
+            AstDot* const dotp = VN_CAST(cpackagep, Dot);
+            AstClassOrPackageRef* const cpackagerefp
+                = dotp ? resolveNestedTypes(dotp) : VN_CAST(cpackagep, ClassOrPackageRef);
+            // Unresolved or deferred, error already reported if there was one
+            if (!cpackagerefp) return;
+            iterate(cpackagerefp);
+            const AstClass* const clsp = VN_CAST(cpackagerefp->classOrPackageNodep(), Class);
+            if (clsp && clsp->hasGParam()) {
+                // Unable to link before the instantiation of parameter classes.
+                // The class reference node still has to be visited now to later link
+                // parameters.
+                return;
+            }
+            // Defer non-typedef references through typedef aliases of parameterized classes.
+            if (m_statep->forPrimary() && !VN_IS(nodep->backp(), Typedef)
+                && isParamedClassRef(cpackagerefp)) {
+                return;
+            }
 
-                const bool doDefaultTypedef = !(m_resolvingTypedef && m_statep->forPrimary());
-                if (!cpackagerefp->classOrPackageSkipp(doDefaultTypedef)) {
-                    VSymEnt* const foundp = m_statep->resolveClassOrPackage(
-                        m_ds.m_dotSymp, cpackagerefp, true, false, "class/package reference");
-                    if (!foundp) return;
+            const bool doDefaultTypedef = !(m_resolvingTypedef && m_statep->forPrimary());
+            if (!cpackagerefp->classOrPackageSkipp(doDefaultTypedef)) {
+                VSymEnt* const foundp = m_statep->resolveClassOrPackage(
+                    m_ds.m_dotSymp, cpackagerefp, !dotp, false, "class/package reference");
+                if (!foundp) return;
+            }
+            nodep->classOrPackagep(cpackagerefp->classOrPackageSkipp(doDefaultTypedef));
+            if (!VN_IS(nodep->classOrPackagep(), Class)
+                && !VN_IS(nodep->classOrPackagep(), Package)) {
+                if (m_statep->forPrimary()) {
+                    // It may be a type that comes from parameter class that is not
+                    // instantioned yet
+                    return;
                 }
-                nodep->classOrPackagep(cpackagerefp->classOrPackageSkipp(doDefaultTypedef));
-                if (!VN_IS(nodep->classOrPackagep(), Class)
-                    && !VN_IS(nodep->classOrPackagep(), Package)) {
-                    if (m_statep->forPrimary()) {
-                        // It may be a type that comes from parameter class that is not
-                        // instantioned yet
-                        iterate(cpackagep);
-                        return;
-                    }
-                    // Likely impossible, as error thrown earlier
-                    cpackagerefp->v3error(  // LCOV_EXCL_LINE
-                        "'::' expected to reference a class/package but referenced '"
-                        << (nodep->classOrPackagep() ? nodep->classOrPackagep()->prettyTypeName()
-                                                     : "<unresolved-object>")
-                        << "'\n"
-                        << cpackagerefp->warnMore() + "... Suggest '.' instead of '::'");
-                }
-            } else {
-                cpackagep->v3warn(E_UNSUPPORTED,
-                                  "Unsupported: Multiple '::' package/class reference");
+                // Likely impossible, as error thrown earlier
+                cpackagerefp->v3error(  // LCOV_EXCL_LINE
+                    "'::' expected to reference a class/package but referenced '"
+                    << (nodep->classOrPackagep() ? nodep->classOrPackagep()->prettyTypeName()
+                                                 : "<unresolved-object>")
+                    << "'\n"
+                    << cpackagerefp->warnMore() + "... Suggest '.' instead of '::'");
             }
             VL_DO_DANGLING(pushDeletep(cpackagep->unlinkFrBack()), cpackagep);
         }
