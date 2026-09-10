@@ -6107,8 +6107,7 @@ class LinkDotResolveVisitor final : public VNVisitor {
             if (!cpackagerefp) return;
             iterate(cpackagerefp);
             // Unresolved, and the visit above already reported it unless it deferred
-            if (!cpackagerefp->classOrPackageNodep() && cpackagerefp->name() != "local::"
-                && !(m_statep->forPrimary() && m_insideClassExtParam)) {
+            if (!cpackagerefp->classOrPackageNodep() && cpackagerefp->name() != "local::") {
                 return;
             }
             const AstClass* const clsp = VN_CAST(cpackagerefp->classOrPackageNodep(), Class);
