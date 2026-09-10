@@ -6106,6 +6106,11 @@ class LinkDotResolveVisitor final : public VNVisitor {
             // Unresolved or deferred, error already reported if there was one
             if (!cpackagerefp) return;
             iterate(cpackagerefp);
+            // Unresolved, and the visit above already reported it unless it deferred
+            if (!cpackagerefp->classOrPackageNodep() && cpackagerefp->name() != "local::"
+                && !(m_statep->forPrimary() && m_insideClassExtParam)) {
+                return;
+            }
             const AstClass* const clsp = VN_CAST(cpackagerefp->classOrPackageNodep(), Class);
             if (clsp && clsp->hasGParam()) {
                 // Unable to link before the instantiation of parameter classes.
