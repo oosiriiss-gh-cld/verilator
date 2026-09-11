@@ -313,8 +313,10 @@ static AstNodeStmt* newIfAssertFailOn(AstNode* bodyp, VAssertDirectiveType direc
 }
 
 static void disableSyncAsyncNetWarn(AstNode* nodep) {
-    nodep->foreach([](AstNode* childp) {
-        childp->fileline()->modifyWarnOff(V3ErrorCode::SYNCASYNCNET, true);
+    // V3Gate reports SYNCASYNCNET on the reference that read the signal,
+    // so suppress on the references, not on the enclosing block
+    nodep->foreach([](AstNodeVarRef* refp) {
+        refp->fileline()->modifyWarnOff(V3ErrorCode::SYNCASYNCNET, true);
     });
 }
 

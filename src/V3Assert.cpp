@@ -775,8 +775,10 @@ class AssertVisitor final : public VNVisitor {
             AstAlways* const alwaysp = new AstAlways{flp, VAlwaysKwd::ALWAYS, sentreep, bodysp};
             // Generated assertion logic is not the user's reset style; V3Gate checks the
             // fileline of each varref, so disable over the whole subtree
-            alwaysp->foreach([](AstNode* childp) {
-                childp->fileline()->modifyWarnOff(V3ErrorCode::SYNCASYNCNET, true);
+            // V3Gate reports SYNCASYNCNET on the reference that read the signal,
+            // so suppress on the references, not on the enclosing block
+            alwaysp->foreach([](AstNodeVarRef* refp) {
+                refp->fileline()->modifyWarnOff(V3ErrorCode::SYNCASYNCNET, true);
             });
             bodysp = alwaysp;
         }
