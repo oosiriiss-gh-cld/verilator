@@ -350,12 +350,12 @@ static void v3GateWarnSyncAsync(GateGraph& graph) {
                     && !sp->fileline()->warnIsOff(V3ErrorCode::SYNCASYNCNET)) {
                     vscp->varp()->user2(true);  // Warn only once per signal
                     sp->v3warn(SYNCASYNCNET,
-                                 "Signal flopped as both synchronous and async: "
-                                     << vscp->prettyNameQ() << '\n'
-                                     << ap->warnOther() << "... Location of async usage\n"
-                                     << ap->warnContextPrimary() << '\n'
-                                     << sp->warnOther() << "... Location of sync usage\n"
-                                     << sp->warnContextSecondary());
+                               "Signal flopped as both synchronous and async: "
+                                   << vscp->prettyNameQ() << '\n'
+                                   << ap->warnOther() << "... Location of async usage\n"
+                                   << ap->warnContextPrimary() << '\n'
+                                   << sp->warnOther() << "... Location of sync usage\n"
+                                   << sp->warnContextSecondary());
                 }
             }
         }
