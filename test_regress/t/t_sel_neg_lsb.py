@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 # DESCRIPTION: Verilator: Verilog Test driver/expect definition
 #
 # This program is free software; you can redistribute it and/or modify it
