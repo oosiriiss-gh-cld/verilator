@@ -349,7 +349,7 @@ static void v3GateWarnSyncAsync(GateGraph& graph) {
                     && !ap->fileline()->warnIsOff(V3ErrorCode::SYNCASYNCNET)
                     && !sp->fileline()->warnIsOff(V3ErrorCode::SYNCASYNCNET)) {
                     vscp->varp()->user2(true);  // Warn only once per signal
-                    vscp->v3warn(SYNCASYNCNET,
+                    sp->v3warn(SYNCASYNCNET,
                                  "Signal flopped as both synchronous and async: "
                                      << vscp->prettyNameQ() << '\n'
                                      << ap->warnOther() << "... Location of async usage\n"

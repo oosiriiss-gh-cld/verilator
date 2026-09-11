@@ -19,6 +19,7 @@
 #include "V3Assert.h"
 
 #include "V3AstUserAllocator.h"
+#include "V3Error.h"
 #include "V3Stats.h"
 #include "V3UniqueNames.h"
 
@@ -770,7 +771,15 @@ class AssertVisitor final : public VNVisitor {
         if (disablep) bodysp = new AstIf{flp, new AstLogNot{flp, disablep}, bodysp};
         // Add assertOn check last, for better combining
         if (!seqEvent) bodysp = newIfAssertOn(bodysp, nodep->directive(), nodep->userType());
-        if (sentreep) bodysp = new AstAlways{flp, VAlwaysKwd::ALWAYS, sentreep, bodysp};
+        if (sentreep) {
+            AstAlways* const alwaysp = new AstAlways{flp, VAlwaysKwd::ALWAYS, sentreep, bodysp};
+            // Generated assertion logic is not the user's reset style; V3Gate checks the
+            // fileline of each varref, so disable over the whole subtree
+            alwaysp->foreach([](AstNode* childp) {
+                childp->fileline()->modifyWarnOff(V3ErrorCode::SYNCASYNCNET, true);
+            });
+            bodysp = alwaysp;
+        }
 
         if (passsp && !passsp->backp()) VL_DO_DANGLING(pushDeletep(passsp), passsp);
         if (failsp && !failsp->backp()) VL_DO_DANGLING(pushDeletep(failsp), failsp);

@@ -32,6 +32,7 @@
 
 #include "V3Assert.h"
 #include "V3Const.h"
+#include "V3Error.h"
 #include "V3Graph.h"
 #include "V3Stats.h"
 #include "V3Task.h"
@@ -311,6 +312,19 @@ static AstNodeStmt* newIfAssertFailOn(AstNode* bodyp, VAssertDirectiveType direc
     return ifp;
 }
 
+static void disableSyncAsyncNetWarn(AstNode* nodep) {
+    nodep->foreach([](AstNode* childp) {
+        childp->fileline()->modifyWarnOff(V3ErrorCode::SYNCASYNCNET, true);
+    });
+}
+
+static AstAlways* newAssertAlways(FileLine* flp, VAlwaysKwd kwd, AstSenTree* sentreep,
+                                  AstNode* bodyp) {
+    AstAlways* const alwaysp = new AstAlways{flp, kwd, sentreep, bodyp};
+    disableSyncAsyncNetWarn(alwaysp);
+    return alwaysp;
+}
+
 //######################################################################
 // NFA Builder
 
@@ -516,7 +530,7 @@ class SvaNfaBuilder final {
         m_modp->addStmtsp(tempVarp);
         AstAssign* const assignp = new AstAssign{flp, new AstVarRef{flp, tempVarp, VAccess::WRITE},
                                                  sampled(exprp->cloneTreePure(false))};
-        m_modp->addStmtsp(new AstAlways{flp, VAlwaysKwd::ALWAYS_COMB, nullptr, assignp});
+        m_modp->addStmtsp(newAssertAlways(flp, VAlwaysKwd::ALWAYS_COMB, nullptr, assignp));
         return tempVarp;
     }
 
@@ -1909,7 +1923,7 @@ class SvaNfaLowering final {
         }
         if (!bodyp) return;
         m_modp->addStmtsp(
-            new AstAlways{c.flp, VAlwaysKwd::ALWAYS, c.senTreep->cloneTree(false), bodyp});
+            newAssertAlways(c.flp, VAlwaysKwd::ALWAYS, c.senTreep->cloneTree(false), bodyp));
     }
 
     // Phase 2b: Bitset ring-buffer delay always block.
@@ -2007,8 +2021,8 @@ class SvaNfaLowering final {
                                                   newTypedConstp(c.flp, idxp->dtypep(), 0)});
             updateBodyp = new AstIf{c.flp, clearCondp, clearCountp, updateBodyp};
 
-            m_modp->addStmtsp(new AstAlways{c.flp, VAlwaysKwd::ALWAYS,
-                                            c.senTreep->cloneTree(false), updateBodyp});
+            m_modp->addStmtsp(newAssertAlways(c.flp, VAlwaysKwd::ALWAYS,
+                                              c.senTreep->cloneTree(false), updateBodyp));
         }
     }
 
@@ -2066,7 +2080,7 @@ class SvaNfaLowering final {
                 c.flp, killActive(c), c.vtx[ai]->datap()->stateSigp->cloneTreePure(false)};
             AstIf* const topp = new AstIf{c.flp, clearCondp, clearLp, setLIfp};
             m_modp->addStmtsp(
-                new AstAlways{c.flp, VAlwaysKwd::ALWAYS, c.senTreep->cloneTree(false), topp});
+                newAssertAlways(c.flp, VAlwaysKwd::ALWAYS, c.senTreep->cloneTree(false), topp));
         }
     }
 
@@ -2075,7 +2089,7 @@ class SvaNfaLowering final {
             = new AstAssignDly{c.flp, new AstVarRef{c.flp, c.killVarp, VAccess::WRITE},
                                assertKillGet(c.flp, c.assertType, c.directiveType)};
         m_modp->addStmtsp(
-            new AstAlways{c.flp, VAlwaysKwd::ALWAYS, c.senTreep->cloneTree(false), ackp});
+            newAssertAlways(c.flp, VAlwaysKwd::ALWAYS, c.senTreep->cloneTree(false), ackp));
     }
 
     // Phase 3/3a/3b: Compute terminal match/reject signals, required-step reject,
@@ -2965,11 +2979,11 @@ class AssertNfaVisitor final : public VNVisitor {
             = new AstAdd{flp, new AstVarRef{flp, cntp, VAccess::READ},
                          new AstConst{flp, AstConst::WidthedValue{}, 32, 1u}};
         incrExprp->dtypeFrom(cntp);
-        m_modp->addStmtsp(new AstAlways{
+        m_modp->addStmtsp(newAssertAlways(
             flp, VAlwaysKwd::ALWAYS,
             new AstSenTree{flp, new AstSenItem{flp, VEdgeType::ET_POSEDGE,
                                                disableExprp->cloneTreePure(false)}},
-            new AstAssign{flp, new AstVarRef{flp, cntp, VAccess::WRITE}, incrExprp}});
+            new AstAssign{flp, new AstVarRef{flp, cntp, VAccess::WRITE}, incrExprp}));
 
         AstVar* const snapp = new AstVar{flp, VVarType::MODULETEMP, cntName + "__snap", u32DTypep};
         snapp->lifetime(VLifetime::STATIC_EXPLICIT);
@@ -3091,7 +3105,7 @@ class AssertNfaVisitor final : public VNVisitor {
                               decrementedFailCountp});
             replayBlockp->addStmtsp(replayLoopp);
             m_modp->addStmtsp(
-                new AstAlways{flp, VAlwaysKwd::ALWAYS, threadFailReplaySenTreep, replayBlockp});
+                newAssertAlways(flp, VAlwaysKwd::ALWAYS, threadFailReplaySenTreep, replayBlockp));
         }
     }
 
