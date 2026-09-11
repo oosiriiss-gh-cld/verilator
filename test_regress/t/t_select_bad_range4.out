@@ -65,7 +65,7 @@
                                      : ... note: In instance 't'
    27 |     sel2 = mi[nonconst : nonconst];
       |                          ^~~~~~~~
-%Warning-WIDTHEXPAND: t/t_select_bad_range4.v:27:10: Operator ASSIGN expects 4 bits on the Assign RHS, but Assign RHS's SEL generates 1 bits.
+%Warning-WIDTHEXPAND: t/t_select_bad_range4.v:27:10: Operator ASSIGN expects 4 bits on the Assign RHS, but Assign RHS's CONST '1'h0' generates 1 bits.
                                                    : ... note: In instance 't'
    27 |     sel2 = mi[nonconst : nonconst];
       |          ^

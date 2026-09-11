@@ -1121,11 +1121,13 @@ class WidthVisitor final : public VNVisitor {
     // IEEE 1800-2023 11.5.1: the bits below bit 0 are out of range, so a read returns
     // zero for them and a write drops them, rather than the index wrapping around.
     // Must run before the code below truncates the LSB to the source's index width.
-    bool fixSelNegLsb(AstSel* nodep, bool isWrite) {
+    bool fixSelNegLsb(AstSel* nodep, bool isWrite, int frommsb) {
         if (m_doGenerate) return false;  // Rechecked once the generate is elaborated
         if (!VN_IS(nodep->lsbp(), Const) || nodep->lsbConst() >= 0) return false;
         // Slices of packed arrays carry an array data type the rewrite below would lose
         if (!VN_IS(nodep->dtypep()->skipRefp(), BasicDType)) return false;
+        // Also off the top, so already diagnosed and handled as out of range above
+        if (nodep->msbConst() > frommsb) return false;
         FileLine* const flp = nodep->fileline();
         const int width = nodep->widthConst();
         const int drop = -nodep->lsbConst();  // Number of selected bits below bit 0
@@ -1300,7 +1302,7 @@ class WidthVisitor final : public VNVisitor {
                                     false /*noerror*/);
                 }
             }
-            if (fixSelNegLsb(nodep, isWriteSelect)) return;
+            if (fixSelNegLsb(nodep, isWriteSelect, frommsb)) return;
             // iterate FINAL is two blocks above
             //
             // If we have a width problem with GENERATE etc, this will reduce
