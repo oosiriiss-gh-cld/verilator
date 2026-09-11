@@ -223,6 +223,9 @@ class WidthVisitor final : public VNVisitor {
     // STATE
     V3UniqueNames m_insideTempNames;  // For generating unique temporary variable names for
                                       // `inside` expressions
+    // Assignment being widthed whose target select lies wholly below bit 0, so
+    // writes nothing.  Set while visiting the target, consumed by the assignment.
+    const AstNodeAssign* m_negLsbDeadAssignp = nullptr;
     VMemberMap m_memberMap;  // Member names cached for fast lookup
     V3TaskConnectState m_taskConnectState;  // State to cache V3Task::taskConnects
     WidthVP* m_vup = nullptr;  // Current node state
@@ -1114,6 +1117,62 @@ class WidthVisitor final : public VNVisitor {
         }
     }
 
+    // Handle a select reaching below bit 0 of its source, e.g. 'x[2:-2]'.
+    // IEEE 1800-2023 11.5.1: the bits below bit 0 are out of range, so a read returns
+    // zero for them and a write drops them, rather than the index wrapping around.
+    // Must run before the code below truncates the LSB to the source's index width.
+    bool fixSelNegLsb(AstSel* nodep, bool isWrite) {
+        if (m_doGenerate) return false;  // Rechecked once the generate is elaborated
+        if (!VN_IS(nodep->lsbp(), Const) || nodep->lsbConst() >= 0) return false;
+        // Slices of packed arrays carry an array data type the rewrite below would lose
+        if (!VN_IS(nodep->dtypep()->skipRefp(), BasicDType)) return false;
+        FileLine* const flp = nodep->fileline();
+        const int width = nodep->widthConst();
+        const int drop = -nodep->lsbConst();  // Number of selected bits below bit 0
+
+        if (!isWrite) {
+            AstNodeExpr* newp;
+            if (drop >= width) {  // Wholly out of range
+                V3Number zeroNum{nodep, width};
+                zeroNum.setAllBits0();
+                newp = new AstConst{flp, zeroNum};
+            } else {
+                const int keep = width - drop;
+                // The blocks above already extended fromp to cover the select's MSB
+                UASSERT_OBJ(keep <= nodep->fromp()->width(), nodep, "Select source not extended");
+                V3Number zeroNum{nodep, drop};
+                zeroNum.setAllBits0();
+                newp = new AstConcat{flp, new AstSel{flp, nodep->fromp()->unlinkFrBack(), 0, keep},
+                                     new AstConst{flp, zeroNum}};
+            }
+            nodep->replaceWith(newp);
+            VL_DO_DANGLING(pushDeletep(nodep), nodep);
+            userIterate(newp, WidthVP{SELF, BOTH}.p());
+            return true;
+        }
+
+        // Writing: narrow the target to the bits that land in range, and drop the
+        // matching bits of the value.  Rewritten this way rather than as a
+        // read-modify-write so the target is not read, which would otherwise look
+        // like circular combinational logic.
+        AstNodeAssign* const assignp = VN_CAST(nodep->backp(), NodeAssign);
+        if (!assignp || assignp->lhsp() != nodep || VN_IS(assignp, AssignForce)) return false;
+        if (drop >= width) {  // Wholly out of range, so the write is discarded
+            m_negLsbDeadAssignp = assignp;
+            return false;
+        }
+        const int keep = width - drop;
+        if (keep > nodep->fromp()->width()) return false;  // Also off the top; leave to V3Unknown
+        // The value is not widthed yet, so select from it before it gains the target's width
+        AstNodeExpr* const rhsp = assignp->rhsp()->unlinkFrBack();
+        assignp->rhsp(new AstSel{rhsp->fileline(), rhsp, drop, keep});
+        AstSel* const newp = new AstSel{flp, nodep->fromp()->unlinkFrBack(), 0, keep};
+        nodep->replaceWith(newp);
+        VL_DO_DANGLING(pushDeletep(nodep), nodep);
+        userIterate(newp, WidthVP{SELF, BOTH}.p());
+        return true;
+    }
+
     void visit(AstSel* nodep) override {
         // Signed: always unsigned; Real: Not allowed
         // LSB is self-determined (IEEE 2012 11.5.1)
@@ -1241,6 +1300,7 @@ class WidthVisitor final : public VNVisitor {
                                     false /*noerror*/);
                 }
             }
+            if (fixSelNegLsb(nodep, isWriteSelect)) return;
             // iterate FINAL is two blocks above
             //
             // If we have a width problem with GENERATE etc, this will reduce
@@ -6501,9 +6561,14 @@ class WidthVisitor final : public VNVisitor {
         //       handled in each visitor.
         //    Then LHS sign-extends only if *RHS* is signed
         assertAtStatement(nodep);
+        bool negLsbDead = false;  // Target is wholly below bit 0, so writes nothing
         {
             // UINFOTREE(1, nodep, "", "assin:");
             userIterateAndNext(nodep->lhsp(), WidthVP{SELF, BOTH}.p());
+            if (m_negLsbDeadAssignp == nodep) {
+                negLsbDead = true;
+                m_negLsbDeadAssignp = nullptr;  // Don't leave a pointer to a stale node
+            }
             UASSERT_OBJ(nodep->lhsp()->dtypep(), nodep, "How can LHS be untyped?");
             UASSERT_OBJ(nodep->lhsp()->dtypep()->widthSized(), nodep, "How can LHS be unsized?");
             nodep->dtypeFrom(nodep->lhsp());
@@ -6642,6 +6707,18 @@ class WidthVisitor final : public VNVisitor {
         if (nodep->hasDType() && nodep->dtypep()->isEvent()) {
             checkEventAssignment(nodep);
             v3Global.setAssignsEvents();
+        }
+
+        if (negLsbDead) {
+            // Nothing is written, but the value is still evaluated for its side effects
+            AstNodeExpr* const rhsp = nodep->rhsp()->unlinkFrBack();
+            if (rhsp->isPure()) {
+                nodep->unlinkFrBack();
+                VL_DO_DANGLING(pushDeletep(rhsp), rhsp);
+            } else {
+                nodep->replaceWith(new AstStmtExpr{nodep->fileline(), rhsp});
+            }
+            VL_DO_DANGLING(pushDeletep(nodep), nodep);
         }
     }
 
