@@ -19,6 +19,16 @@ package pkg;
       endclass
     endclass
   endclass
+  class twice #(int N = 0);
+    class inner #(int M = 0);
+      typedef bit [M:0] some_type;
+    endclass
+    class deeper;
+      class inner #(int M = 0);
+        typedef bit [M:0] some_type;
+      endclass
+    endclass
+  endclass
 endpackage
 
 class C;
@@ -43,6 +53,10 @@ module t;
   pkg::nested1::bad_type n4;
   // Parametrized class without #()
   pkg::nested1::nested21::nested3::nested4 n5;
+  // Only one element of a '::' chain may be specialized
+  pkg::twice #(0)::inner #(6)::some_type t1;
+  pkg::twice #(0)::inner #(6) t2;
+  $unit::pkg::twice #(0)::deeper::inner #(6)::some_type t3;
   // Unknown middle type behind a '$unit::' prefix
   $unit::pkg::nested1::bad_type::nested3 n6;
   F f ();

@@ -3659,6 +3659,29 @@ class LinkDotResolveVisitor final : public VNVisitor {
         iterateNull(nodep);
     }
 
+    // Only the leftmost deferred reference of a '::' chain can be specialized by
+    // V3Param, as the parameter pins of anything after it are linked here, and this is
+    // as far as the chain can be resolved.  Report that rather than failing with an
+    // internal error later.  Returns true when reported.
+    static bool reportChainedParams(AstNode* nodep) {
+        const auto report = [](AstNode* reportp) {
+            reportp->v3warn(E_UNSUPPORTED,
+                            "Unsupported: Multiple parameterized classes in one '::' reference");
+            return true;
+        };
+        while (AstDot* const chainp = VN_CAST(nodep, Dot)) {
+            AstClassOrPackageRef* const refp = VN_CAST(chainp->rhsp(), ClassOrPackageRef);
+            if (refp && refp->paramsp()) return report(refp);
+            nodep = chainp->backp();
+            AstDot* const updotp = VN_CAST(nodep, Dot);
+            if (!updotp || updotp->lhsp() != chainp) break;
+        }
+        // Top of the chain, the referenced type itself may be parameterized too
+        AstRefDType* const refdtypep = VN_CAST(nodep, RefDType);
+        if (refdtypep && refdtypep->paramsp()) return report(refdtypep);
+        return false;
+    }
+
     // Replace the LHS of 'dotp', already resolved down to 'refp', with 'refp' itself,
     // so what is left is the not yet resolved tail of the chain
     void collapseResolvedLhs(AstDot* const dotp, AstClassOrPackageRef* const refp) {
@@ -3690,6 +3713,7 @@ class LinkDotResolveVisitor final : public VNVisitor {
         if (!parentTypep->classOrPackageNodep()) { return nullptr; }
         // Do not resolve unspecialized parametrized classes
         if (deferParamedRef(parentTypep)) {
+            if (reportChainedParams(dotp)) return nullptr;
             // V3Param specializes the reference later, but only finds it when it is
             // directly under the Dot, so drop the already resolved part of the chain
             collapseResolvedLhs(dotp, parentTypep);
@@ -6133,7 +6157,10 @@ class LinkDotResolveVisitor final : public VNVisitor {
                 // Unresolved, errors reported earlier
                 return;
             }
-            if (deferParamedRef(cpackagerefp)) { return; }
+            if (deferParamedRef(cpackagerefp)) {
+                reportChainedParams(nodep);
+                return;
+            }
             const bool doDefaultTypedef = !(m_resolvingTypedef && m_statep->forPrimary());
             if (!cpackagerefp->classOrPackageSkipp(doDefaultTypedef)) {
                 VSymEnt* const foundp = m_statep->resolveClassOrPackage(

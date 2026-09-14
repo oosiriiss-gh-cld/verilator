@@ -1,24 +1,34 @@
-%Error: t/t_nested_types_chain_bad.v:33:6: Package/class for ':: reference' not found: 'D'
-   33 |   C::D::E::T x;
+%Error: t/t_nested_types_chain_bad.v:43:6: Package/class for ':: reference' not found: 'D'
+   43 |   C::D::E::T x;
       |      ^
         ... See the manual at https://verilator.org/verilator_doc.html?v=latest for more assistance.
-%Error: t/t_nested_types_chain_bad.v:38:3: Package/class for ':: reference' not found: 'bad'
-   38 |   bad::nested1::x::y n1;
+%Error: t/t_nested_types_chain_bad.v:48:3: Package/class for ':: reference' not found: 'bad'
+   48 |   bad::nested1::x::y n1;
       |   ^~~
-%Error: t/t_nested_types_chain_bad.v:40:8: Package/class for ':: reference' not found: 'bad_type'
-   40 |   pkg::bad_type::nested3 n2;
+%Error: t/t_nested_types_chain_bad.v:50:8: Package/class for ':: reference' not found: 'bad_type'
+   50 |   pkg::bad_type::nested3 n2;
       |        ^~~~~~~~
-%Error: t/t_nested_types_chain_bad.v:41:17: Package/class for ':: reference' not found: 'bad_type'
-   41 |   pkg::nested1::bad_type::nested3 n3;
+%Error: t/t_nested_types_chain_bad.v:51:17: Package/class for ':: reference' not found: 'bad_type'
+   51 |   pkg::nested1::bad_type::nested3 n3;
       |                 ^~~~~~~~
-%Error: t/t_nested_types_chain_bad.v:43:17: Can't find typedef/interface: 'bad_type'
-   43 |   pkg::nested1::bad_type n4;
+%Error: t/t_nested_types_chain_bad.v:53:17: Can't find typedef/interface: 'bad_type'
+   53 |   pkg::nested1::bad_type n4;
       |                 ^~~~~~~~
-%Error: t/t_nested_types_chain_bad.v:45:27: Reference to parameterized class without #() (IEEE 1800-2023 8.25.1)
+%Error: t/t_nested_types_chain_bad.v:55:27: Reference to parameterized class without #() (IEEE 1800-2023 8.25.1)
                                           : ... Suggest use 'nested3#()'
-   45 |   pkg::nested1::nested21::nested3::nested4 n5;
+   55 |   pkg::nested1::nested21::nested3::nested4 n5;
       |                           ^~~~~~~
-%Error: t/t_nested_types_chain_bad.v:47:24: Package/class for ':: reference' not found: 'bad_type'
-   47 |   $unit::pkg::nested1::bad_type::nested3 n6;
+%Error-UNSUPPORTED: t/t_nested_types_chain_bad.v:57:20: Unsupported: Multiple parameterized classes in one '::' reference
+   57 |   pkg::twice #(0)::inner #(6)::some_type t1;
+      |                    ^~~~~
+                    ... For error description see https://verilator.org/warn/UNSUPPORTED?v=latest
+%Error-UNSUPPORTED: t/t_nested_types_chain_bad.v:58:20: Unsupported: Multiple parameterized classes in one '::' reference
+   58 |   pkg::twice #(0)::inner #(6) t2;
+      |                    ^~~~~
+%Error-UNSUPPORTED: t/t_nested_types_chain_bad.v:59:35: Unsupported: Multiple parameterized classes in one '::' reference
+   59 |   $unit::pkg::twice #(0)::deeper::inner #(6)::some_type t3;
+      |                                   ^~~~~
+%Error: t/t_nested_types_chain_bad.v:61:24: Package/class for ':: reference' not found: 'bad_type'
+   61 |   $unit::pkg::nested1::bad_type::nested3 n6;
       |                        ^~~~~~~~
 %Error: Exiting due to
