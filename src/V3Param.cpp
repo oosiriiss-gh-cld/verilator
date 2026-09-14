@@ -268,11 +268,9 @@ class ParamProcessor final {
     using CloneMap = std::unordered_map<const AstNode*, AstNode*>;
     struct ModInfo final {
         AstNodeModule* const m_modp;  // Module with specified name
-        const AstNodeModule* const m_srcModp;  // Module this was specialized from
         CloneMap m_cloneMap;  // Map of old-varp -> new cloned varp
-        ModInfo(AstNodeModule* modp, const AstNodeModule* srcModp)
-            : m_modp{modp}
-            , m_srcModp{srcModp} {}
+        explicit ModInfo(AstNodeModule* modp)
+            : m_modp{modp} {}
     };
     std::map<const std::string, ModInfo> m_modNameMap;  // Hash of created module flavors by name
 
@@ -1085,7 +1083,7 @@ class ParamProcessor final {
         }
         insertp->addNextHere(newModp);
 
-        m_modNameMap.emplace(newModp->name(), ModInfo{newModp, srcModp});
+        m_modNameMap.emplace(newModp->name(), ModInfo{newModp});
         const auto iter = m_modNameMap.find(newname);
         CloneMap* const clonemapp = &(iter->second.m_cloneMap);
         UINFO(4, "     De-parameterize to new: " << newModp);
@@ -1170,29 +1168,19 @@ class ParamProcessor final {
     }
     const ModInfo* moduleFindOrClone(AstNodeModule* srcModp, AstNode* ifErrorp, AstPin* paramsp,
                                      const string& newname, const IfaceRefRefs& ifaceRefRefs) {
-        // Already made this flavor?  Two distinct modules can carry the same name -- same-named
-        // classes in different scopes, or a class nested in two specializations of its parent --
-        // and a name computed from the parameters alone cannot tell them apart.  Only reuse an
-        // entry specialized from this very module; otherwise give this source its own name, so
-        // the two do not collapse into one specialization.
-        // Only classes: a recursive module reaches the same specialization from several of its
-        // own expansions, and those must keep sharing one entry (t_recursive_module_bug_2).
-        const bool perSource = VN_IS(srcModp, Class);
-        string name = newname;
-        for (int attempt = 0; true; ++attempt) {
-            if (attempt) name = newname + "__Vsrc" + cvtToStr(attempt);
-            const auto prevIt = m_modNameMap.find(name);
-            if (prevIt == m_modNameMap.end()) break;
-            if (!perSource || prevIt->second.m_srcModp == srcModp) {
-                UINFO(4, "     De-parameterize to prev: " << prevIt->second.m_modp);
-                return &(prevIt->second);
+        // Already made this flavor?
+        auto it = m_modNameMap.find(newname);
+        if (it != m_modNameMap.end()) {
+            UINFO(4, "     De-parameterize to prev: " << it->second.m_modp);
+        } else {
+            if (!deepCloneModule(srcModp, ifErrorp, paramsp, newname, ifaceRefRefs)) {
+                return nullptr;
             }
-            UINFO(9, "     Name collision on '" << name << "' from " << srcModp);
+            it = m_modNameMap.find(newname);
+            UASSERT(it != m_modNameMap.end(), "should find just-made module");
         }
-        if (!deepCloneModule(srcModp, ifErrorp, paramsp, name, ifaceRefRefs)) return nullptr;
-        const auto it = m_modNameMap.find(name);
-        UASSERT(it != m_modNameMap.end(), "should find just-made module");
-        return &(it->second);
+        const ModInfo* const modInfop = &(it->second);
+        return modInfop;
     }
 
     void convertToStringp(AstNode* nodep) {
