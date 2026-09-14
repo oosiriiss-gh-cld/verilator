@@ -1,0 +1,21 @@
+%Error: t/t_nested_types_chain_bad.v:33:6: Package/class for ':: reference' not found: 'D'
+   33 |   C::D::E::T x;
+      |      ^
+        ... See the manual at https://verilator.org/verilator_doc.html?v=latest for more assistance.
+%Error: t/t_nested_types_chain_bad.v:38:3: Package/class for ':: reference' not found: 'bad'
+   38 |   bad::nested1::x::y n1;
+      |   ^~~
+%Error: t/t_nested_types_chain_bad.v:40:8: Package/class for ':: reference' not found: 'bad_type'
+   40 |   pkg::bad_type::nested3 n2;
+      |        ^~~~~~~~
+%Error: t/t_nested_types_chain_bad.v:41:17: Package/class for ':: reference' not found: 'bad_type'
+   41 |   pkg::nested1::bad_type::nested3 n3;
+      |                 ^~~~~~~~
+%Error: t/t_nested_types_chain_bad.v:43:17: Can't find typedef/interface: 'bad_type'
+   43 |   pkg::nested1::bad_type n4;
+      |                 ^~~~~~~~
+%Error: t/t_nested_types_chain_bad.v:45:27: Reference to parameterized class without #() (IEEE 1800-2023 8.25.1)
+                                          : ... Suggest use 'nested3#()'
+   45 |   pkg::nested1::nested21::nested3::nested4 n5;
+      |                           ^~~~~~~
+%Error: Exiting due to
