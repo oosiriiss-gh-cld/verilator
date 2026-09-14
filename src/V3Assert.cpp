@@ -770,7 +770,13 @@ class AssertVisitor final : public VNVisitor {
         if (disablep) bodysp = new AstIf{flp, new AstLogNot{flp, disablep}, bodysp};
         // Add assertOn check last, for better combining
         if (!seqEvent) bodysp = newIfAssertOn(bodysp, nodep->directive(), nodep->userType());
-        if (sentreep) bodysp = new AstAlways{flp, VAlwaysKwd::ALWAYS, sentreep, bodysp};
+        if (sentreep) {
+            AstAlways* const alwaysp = new AstAlways{flp, VAlwaysKwd::ALWAYS, sentreep, bodysp};
+            alwaysp->foreach([](AstNodeVarRef* nodep) {
+                nodep->fileline()->modifyWarnOff(V3ErrorCode::SYNCASYNCNET, true);
+            });
+            bodysp = alwaysp;
+        }
 
         if (passsp && !passsp->backp()) VL_DO_DANGLING(pushDeletep(passsp), passsp);
         if (failsp && !failsp->backp()) VL_DO_DANGLING(pushDeletep(failsp), failsp);
