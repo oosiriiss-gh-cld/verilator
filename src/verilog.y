@@ -7914,17 +7914,12 @@ packageClassScopeList<nodeExprp>:   // IEEE: class_type: "id [ parameter_value_a
         //                      //     if not needed must use packageClassScopeNoId
         //                      // In this parser <package_identifier>:: and <class_identifier>:: are indistinguishible
         //                      // If you follow the rules down, class_type is really a list via ps_class_identifier
-        //                      // Left-recursive, so a chain is always a left-nested Dot tree
-                packageClassScopeFirst                  { $$ = $1; }
-        |       packageClassScopeList packageClassScopeItem
-                        { $$ = new AstDot{$<fl>2, true, $1, $2}; }
-        ;
-
-packageClassScopeFirst<nodeExprp>:  // Leftmost element of a packageClassScopeList
-        //                      // '$unit::' is only legal as the leftmost element, but is
-        //                      // listed here so that '$unit::a::b' nests as the other chains do
+        //                      // Left recursive, so a chain is always a left-nested Dot tree.
+        //                      // '$unit::' is only a base case, so may only be the leftmost element
                 packageClassScopeItem                   { $$ = $1; }
         |       dollarUnitNextId yP_COLONCOLON          { $$ = $1; }
+        |       packageClassScopeList packageClassScopeItem
+                        { $$ = new AstDot{$<fl>2, true, $1, $2}; }
         ;
 
 packageClassScopeItem<nodeExprp>:   // IEEE: package_scope or [package_scope]::[class_scope]
