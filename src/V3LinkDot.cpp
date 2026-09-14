@@ -6099,14 +6099,19 @@ class LinkDotResolveVisitor final : public VNVisitor {
         }
         LINKDOT_VISIT_START();
         UINFO(5, indent() << "visit " << nodep);
-        if (AstNode* const cpackagep = nodep->classOrPackageOpp()) {
+        if (AstNode* cpackagep = nodep->classOrPackageOpp()) {
             VL_RESTORER_COPY(m_ds);
-            AstClassOrPackageRef* cpackagerefp = VN_CAST(cpackagep, ClassOrPackageRef);
-            // Resolve nested parents class/packages first
+            // Resolve parents of parent
             if (AstDot* dotp = VN_CAST(cpackagep, Dot)) {
-                cpackagerefp = resolveNestedTypes(dotp);
+                AstClassOrPackageRef* const parentToResolve = resolveNestedTypes(dotp);
+                // Couldn't resolve, errors reported earlier
+                if (!parentToResolve) { return; }
+                dotp->replaceWith(parentToResolve->unlinkFrBack());
+                VL_DO_DANGLING(pushDeletep(dotp), dotp);
+                cpackagep = parentToResolve;
             }
-            // Couldn't resolve nested types, errors reported earlier
+
+            AstClassOrPackageRef* cpackagerefp = VN_CAST(cpackagep, ClassOrPackageRef);
             if (!cpackagerefp) { return; }
             iterate(cpackagerefp);
             if (!cpackagerefp->classOrPackageNodep() && cpackagerefp->name() != "local::") {

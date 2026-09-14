@@ -39,6 +39,21 @@ package pkg;
     endclass
   endclass
 endpackage
+
+// Parametrized class nested in a $unit-scope class: the '::' chain's leftmost
+// element is a class rather than a package
+class unit_cls;
+  class uparamed #(
+      int N = 8
+  );
+    typedef bit [N:0] some_type;
+    int x = N;
+    class nested;
+      int y = 4;
+    endclass
+  endclass
+endclass
+
 module mtyped #(
     type P
 );
@@ -58,6 +73,10 @@ module t;
   pkg::paramed #()::nested::some_type value_def;
   pkg::paramed #(16)::some_type value2;
   pkg::paramed #()::some_type value2_def;
+  unit_cls::uparamed #(16)::some_type u_value;
+  unit_cls::uparamed #()::some_type u_value_def;
+  unit_cls::uparamed #(16) u_obj;
+  unit_cls::uparamed #(16)::nested u_nested;
   mtyped #(pkg::nested1) u ();
   initial begin
     n1 = new;
@@ -68,6 +87,8 @@ module t;
     n21_3_4 = new;
     n21_3def_4 = new;
     u.nested = new;
+    u_obj = new;
+    u_nested = new;
     `checkd(n1.x, 1);
     `checkd(n21.x, 21);
     `checkd(n22.x, 22);
@@ -80,6 +101,10 @@ module t;
     `checkd($bits(value2), 17);
     `checkd($bits(value2_def), 9);
     `checkd(u.nested.x, 3);
+    `checkd($bits(u_value), 17);
+    `checkd($bits(u_value_def), 9);
+    `checkd(u_obj.x, 16);
+    `checkd(u_nested.y, 4);
     $finish;
   end
 endmodule
