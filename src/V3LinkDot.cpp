@@ -3659,18 +3659,16 @@ class LinkDotResolveVisitor final : public VNVisitor {
         iterateNull(nodep);
     }
 
-    // Resolve every parent of a nested type chain, from the leftmost element rightwards,
-    // and set their symbol tables in m_ds.
-    // The chain is normally left-nested as 'Dot(Dot(..., Parent), ClsOrPkg)', but a
-    // '$unit::' prefix is parsed as 'Dot($unit, Dot(...))', so either side may be a Dot.
-    // Returns the rightmost reference for the caller to resolve,
+    // Resolve every parent of nested type chains with 'Dot(Dot(..., Parent), ClsOrPkg)'
+    // shape starting from the most nested one and sets their symbol tables to m_ds
+    // Returns the topmost RHS to resolve for the caller
     //  or nullptr when the type couldn't be resolved or the resolving has been deferred
     AstClassOrPackageRef* resolveNestedTypes(const AstDot* const dotp) {
         UASSERT_OBJ(dotp->colon(), dotp, "Dot should be '::' during scope resolution");
         UASSERT_OBJ(VN_IS(dotp->lhsp(), Dot) || VN_IS(dotp->lhsp(), ClassOrPackageRef), dotp,
                     "Dot's LHS should be nested parent type or class/package reference");
-        UASSERT_OBJ(VN_IS(dotp->rhsp(), Dot) || VN_IS(dotp->rhsp(), ClassOrPackageRef), dotp,
-                    "Dot's RHS should be nested type or class/package reference");
+        UASSERT_OBJ(VN_IS(dotp->rhsp(), ClassOrPackageRef), dotp,
+                    "Dot's RHS should be class/package reference");
 
         AstClassOrPackageRef* parentTypep = VN_CAST(dotp->lhsp(), ClassOrPackageRef);
         if (const AstDot* const lhsDotp = VN_CAST(dotp->lhsp(), Dot)) {
@@ -3686,10 +3684,6 @@ class LinkDotResolveVisitor final : public VNVisitor {
         if (!parentp) { return nullptr; }
         m_ds.m_dotSymp = m_statep->getNodeSym(parentp);
         m_ds.m_dotPos = DP_PACKAGE;
-        // '$unit::' puts the rest of the chain under the RHS, keep resolving it there
-        if (const AstDot* const rhsDotp = VN_CAST(dotp->rhsp(), Dot)) {
-            return resolveNestedTypes(rhsDotp);
-        }
         return VN_AS(dotp->rhsp(), ClassOrPackageRef);
     }
 
