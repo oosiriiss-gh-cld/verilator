@@ -18,4 +18,7 @@
                                           : ... Suggest use 'nested3#()'
    45 |   pkg::nested1::nested21::nested3::nested4 n5;
       |                           ^~~~~~~
+%Error: t/t_nested_types_chain_bad.v:47:24: Package/class for ':: reference' not found: 'bad_type'
+   47 |   $unit::pkg::nested1::bad_type::nested3 n6;
+      |                        ^~~~~~~~
 %Error: Exiting due to

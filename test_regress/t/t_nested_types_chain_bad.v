@@ -43,5 +43,7 @@ module t;
   pkg::nested1::bad_type n4;
   // Parametrized class without #()
   pkg::nested1::nested21::nested3::nested4 n5;
+  // Unknown middle type behind a '$unit::' prefix
+  $unit::pkg::nested1::bad_type::nested3 n6;
   F f ();
 endmodule

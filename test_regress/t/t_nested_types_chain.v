@@ -77,6 +77,11 @@ module t;
   unit_cls::uparamed #()::some_type u_value_def;
   unit_cls::uparamed #(16) u_obj;
   unit_cls::uparamed #(16)::nested u_nested;
+  // A '$unit::' prefix parses as a right-nested 'Dot($unit, Dot(...))' chain
+  $unit::pkg::nested1::nested21 d_n21;
+  $unit::pkg::nested1::nested21::nested3 #(15) d_n21_3_param;
+  $unit::unit_cls::uparamed #(16)::some_type d_value;
+  $unit::unit_cls::uparamed #(16)::nested d_nested;
   mtyped #(pkg::nested1) u ();
   initial begin
     n1 = new;
@@ -89,6 +94,9 @@ module t;
     u.nested = new;
     u_obj = new;
     u_nested = new;
+    d_n21 = new;
+    d_n21_3_param = new;
+    d_nested = new;
     `checkd(n1.x, 1);
     `checkd(n21.x, 21);
     `checkd(n22.x, 22);
@@ -105,6 +113,10 @@ module t;
     `checkd($bits(u_value_def), 9);
     `checkd(u_obj.x, 16);
     `checkd(u_nested.y, 4);
+    `checkd(d_n21.x, 21);
+    `checkd(d_n21_3_param.x, 15);
+    `checkd($bits(d_value), 17);
+    `checkd(d_nested.y, 4);
     $finish;
   end
 endmodule
