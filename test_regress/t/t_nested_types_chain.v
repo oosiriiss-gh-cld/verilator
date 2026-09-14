@@ -49,6 +49,7 @@ class unit_cls;
     typedef bit [N:0] some_type;
     int x = N;
     class nested;
+      typedef bit [N-1:0] some_type;
       int y = 4;
     endclass
   endclass
@@ -77,11 +78,16 @@ module t;
   unit_cls::uparamed #()::some_type u_value_def;
   unit_cls::uparamed #(16) u_obj;
   unit_cls::uparamed #(16)::nested u_nested;
+  // Parametrized class in the middle of the chain, under a class rather than a package,
+  // with more than one element following it
+  unit_cls::uparamed #(16)::nested::some_type u_nested_value;
+  unit_cls::uparamed #()::nested::some_type u_nested_value_def;
   // A '$unit::' prefix parses as a right-nested 'Dot($unit, Dot(...))' chain
   $unit::pkg::nested1::nested21 d_n21;
   $unit::pkg::nested1::nested21::nested3 #(15) d_n21_3_param;
   $unit::unit_cls::uparamed #(16)::some_type d_value;
   $unit::unit_cls::uparamed #(16)::nested d_nested;
+  $unit::unit_cls::uparamed #(16)::nested::some_type d_nested_value;
   mtyped #(pkg::nested1) u ();
   initial begin
     n1 = new;
@@ -117,6 +123,9 @@ module t;
     `checkd(d_n21_3_param.x, 15);
     `checkd($bits(d_value), 17);
     `checkd(d_nested.y, 4);
+    `checkd($bits(u_nested_value), 16);
+    `checkd($bits(u_nested_value_def), 8);
+    `checkd($bits(d_nested_value), 16);
     $finish;
   end
 endmodule

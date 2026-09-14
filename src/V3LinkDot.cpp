@@ -3659,11 +3659,21 @@ class LinkDotResolveVisitor final : public VNVisitor {
         iterateNull(nodep);
     }
 
+    // Replace the LHS of 'dotp', already resolved down to 'refp', with 'refp' itself,
+    // so what is left is the not yet resolved tail of the chain
+    void collapseResolvedLhs(AstDot* const dotp, AstClassOrPackageRef* const refp) {
+        if (dotp->lhsp() == refp) return;
+        AstNode* const lhsp = dotp->lhsp();
+        refp->unlinkFrBack();
+        lhsp->replaceWith(refp);
+        VL_DO_DANGLING(pushDeletep(lhsp), lhsp);
+    }
+
     // Resolve every parent of nested type chains with 'Dot(Dot(..., Parent), ClsOrPkg)'
     // shape starting from the most nested one and sets their symbol tables to m_ds
     // Returns the topmost RHS to resolve for the caller
     //  or nullptr when the type couldn't be resolved or the resolving has been deferred
-    AstClassOrPackageRef* resolveNestedTypes(const AstDot* const dotp) {
+    AstClassOrPackageRef* resolveNestedTypes(AstDot* const dotp) {
         UASSERT_OBJ(dotp->colon(), dotp, "Dot should be '::' during scope resolution");
         UASSERT_OBJ(VN_IS(dotp->lhsp(), Dot) || VN_IS(dotp->lhsp(), ClassOrPackageRef), dotp,
                     "Dot's LHS should be nested parent type or class/package reference");
@@ -3671,7 +3681,7 @@ class LinkDotResolveVisitor final : public VNVisitor {
                     "Dot's RHS should be class/package reference");
 
         AstClassOrPackageRef* parentTypep = VN_CAST(dotp->lhsp(), ClassOrPackageRef);
-        if (const AstDot* const lhsDotp = VN_CAST(dotp->lhsp(), Dot)) {
+        if (AstDot* const lhsDotp = VN_CAST(dotp->lhsp(), Dot)) {
             parentTypep = resolveNestedTypes(lhsDotp);
         }
         if (!parentTypep) { return nullptr; }
@@ -3679,7 +3689,12 @@ class LinkDotResolveVisitor final : public VNVisitor {
         iterate(parentTypep);
         if (!parentTypep->classOrPackageNodep()) { return nullptr; }
         // Do not resolve unspecialized parametrized classes
-        if (deferParamedRef(parentTypep)) { return nullptr; }
+        if (deferParamedRef(parentTypep)) {
+            // V3Param specializes the reference later, but only finds it when it is
+            // directly under the Dot, so drop the already resolved part of the chain
+            collapseResolvedLhs(dotp, parentTypep);
+            return nullptr;
+        }
         const AstNodeModule* const parentp = parentTypep->classOrPackageSkipp();
         if (!parentp) { return nullptr; }
         m_ds.m_dotSymp = m_statep->getNodeSym(parentp);
