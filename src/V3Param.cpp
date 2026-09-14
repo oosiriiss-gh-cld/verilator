@@ -268,9 +268,11 @@ class ParamProcessor final {
     using CloneMap = std::unordered_map<const AstNode*, AstNode*>;
     struct ModInfo final {
         AstNodeModule* const m_modp;  // Module with specified name
+        const AstNodeModule* const m_srcModp;  // Module this was specialized from
         CloneMap m_cloneMap;  // Map of old-varp -> new cloned varp
-        explicit ModInfo(AstNodeModule* modp)
-            : m_modp{modp} {}
+        ModInfo(AstNodeModule* modp, const AstNodeModule* srcModp)
+            : m_modp{modp}
+            , m_srcModp{srcModp} {}
     };
     std::map<const std::string, ModInfo> m_modNameMap;  // Hash of created module flavors by name
 
@@ -1083,7 +1085,7 @@ class ParamProcessor final {
         }
         insertp->addNextHere(newModp);
 
-        m_modNameMap.emplace(newModp->name(), ModInfo{newModp});
+        m_modNameMap.emplace(newModp->name(), ModInfo{newModp, srcModp});
         const auto iter = m_modNameMap.find(newname);
         CloneMap* const clonemapp = &(iter->second.m_cloneMap);
         UINFO(4, "     De-parameterize to new: " << newModp);
@@ -1168,19 +1170,29 @@ class ParamProcessor final {
     }
     const ModInfo* moduleFindOrClone(AstNodeModule* srcModp, AstNode* ifErrorp, AstPin* paramsp,
                                      const string& newname, const IfaceRefRefs& ifaceRefRefs) {
-        // Already made this flavor?
-        auto it = m_modNameMap.find(newname);
-        if (it != m_modNameMap.end()) {
-            UINFO(4, "     De-parameterize to prev: " << it->second.m_modp);
-        } else {
-            if (!deepCloneModule(srcModp, ifErrorp, paramsp, newname, ifaceRefRefs)) {
-                return nullptr;
+        // Already made this flavor?  Two distinct modules can carry the same name -- same-named
+        // classes in different scopes, or a class nested in two specializations of its parent --
+        // and a name computed from the parameters alone cannot tell them apart.  Only reuse an
+        // entry specialized from this very module; otherwise give this source its own name, so
+        // the two do not collapse into one specialization.
+        // Only classes: a recursive module reaches the same specialization from several of its
+        // own expansions, and those must keep sharing one entry (t_recursive_module_bug_2).
+        const bool perSource = VN_IS(srcModp, Class);
+        string name = newname;
+        for (int attempt = 0; true; ++attempt) {
+            if (attempt) name = newname + "__Vsrc" + cvtToStr(attempt);
+            const auto prevIt = m_modNameMap.find(name);
+            if (prevIt == m_modNameMap.end()) break;
+            if (!perSource || prevIt->second.m_srcModp == srcModp) {
+                UINFO(4, "     De-parameterize to prev: " << prevIt->second.m_modp);
+                return &(prevIt->second);
             }
-            it = m_modNameMap.find(newname);
-            UASSERT(it != m_modNameMap.end(), "should find just-made module");
+            UINFO(9, "     Name collision on '" << name << "' from " << srcModp);
         }
-        const ModInfo* const modInfop = &(it->second);
-        return modInfop;
+        if (!deepCloneModule(srcModp, ifErrorp, paramsp, name, ifaceRefRefs)) return nullptr;
+        const auto it = m_modNameMap.find(name);
+        UASSERT(it != m_modNameMap.end(), "should find just-made module");
+        return &(it->second);
     }
 
     void convertToStringp(AstNode* nodep) {
@@ -2640,11 +2652,155 @@ class ParamVisitor final : public VNVisitor {
                     if (VN_IS(newModp, Iface) && newModp != srcModp) {
                         specializeNestedIfaceCells(newModp);
                     }
+
+                    // A '::' chain may parameterize more than one of its links, as in
+                    // 'outer#(16)::inner#(3)::t'.  V3LinkDot could not resolve 'inner'
+                    // before 'outer' was specialized, so link it to the specialization's
+                    // member now and queue it here, which deparameterizes it in this same
+                    // loop and cascades to any further parameterized link after it.
+                    if (AstClassOrPackageRef* const refp = VN_CAST(cellp, ClassOrPackageRef)) {
+                        queueChainSuccessor(refp, newModp, genHierName);
+                    }
                 }
             }
         }
 
         m_iterateModule = false;
+    }
+
+    // Next link of a left-leaning '::' chain: given Dot(Dot(A, B), C), B follows A and
+    // C follows B.  Returns nullptr when nodep is the last link of the chain.
+    static AstClassOrPackageRef* chainSuccessorp(const AstNode* nodep) {
+        while (const AstDot* const dotp = VN_CAST(nodep->backp(), Dot)) {
+            if (dotp->lhsp() == nodep) return VN_CAST(dotp->rhsp(), ClassOrPackageRef);
+            nodep = dotp;  // nodep closed the left sub-chain, so step out a level
+        }
+        return nullptr;
+    }
+
+    // Link pinsp to modp's parameters the way V3LinkDot's AstPin visitor would have, had the
+    // reference been resolvable in the pass before V3Param.  Positional pins are named
+    // '__paramNumberN' after the Nth parameter in declaration order; the rest match by name.
+    // Returns false, leaving the pins alone, if any pin has no counterpart in modp.
+    static bool linkPinsToParams(AstPin* pinsp, const AstNodeModule* modp) {
+        std::vector<AstNode*> byPosition;
+        std::map<const string, AstNode*> byName;
+        for (AstNode* stmtp = modp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
+            const AstVar* const varp = VN_CAST(stmtp, Var);
+            if (!VN_IS(stmtp, ParamTypeDType) && !(varp && varp->isGParam())) continue;
+            byPosition.push_back(stmtp);
+            byName.emplace(stmtp->name(), stmtp);
+        }
+        std::vector<std::pair<AstPin*, AstNode*>> links;
+        for (AstPin* pinp = pinsp; pinp; pinp = VN_AS(pinp->nextp(), Pin)) {
+            if (pinp->modVarp() || pinp->modPTypep()) continue;
+            AstNode* targetp = nullptr;
+            const string& name = pinp->name();
+            static const string prefix{"__paramNumber"};
+            if (VString::startsWith(name, prefix)) {
+                const string numStr = name.substr(prefix.size());
+                const int num = std::atoi(numStr.c_str());
+                if (num < 1 || num > static_cast<int>(byPosition.size())) return false;
+                targetp = byPosition[num - 1];
+            } else {
+                const auto it = byName.find(name);
+                if (it == byName.end()) return false;
+                targetp = it->second;
+            }
+            links.emplace_back(pinp, targetp);
+        }
+        for (const auto& link : links) {
+            if (AstVar* const varp = VN_CAST(link.second, Var)) {
+                link.first->modVarp(varp);
+            } else {
+                link.first->modPTypep(VN_AS(link.second, ParamTypeDType));
+            }
+        }
+        return true;
+    }
+
+    // The AstRefDType naming the type a '::' chain ends at, if the chain is under one.
+    static AstRefDType* chainRefDTypep(const AstNode* nodep) {
+        while (const AstDot* const dotp = VN_CAST(nodep->backp(), Dot)) nodep = dotp;
+        return VN_CAST(nodep->backp(), RefDType);
+    }
+
+    // True if anything after nodep in its '::' chain still needs specializing, either a further
+    // reference in the chain or the class-typed declaration the chain ends at.
+    static bool chainHasUnresolvedParams(const AstNode* nodep) {
+        while (const AstClassOrPackageRef* const nextp = chainSuccessorp(nodep)) {
+            if (nextp->paramsp() && !nextp->classOrPackageNodep()) return true;
+            nodep = nextp;
+        }
+        const AstRefDType* const refDTypep = chainRefDTypep(nodep);
+        return refDTypep && refDTypep->paramsp() && !refDTypep->typedefp()
+               && !refDTypep->refDTypep();
+    }
+
+    static AstNode* findMemberByName(const AstClass* classp, const string& name) {
+        for (AstNode* itemp = classp->membersp(); itemp; itemp = itemp->nextp()) {
+            if (itemp->name() == name) return itemp;
+        }
+        return nullptr;
+    }
+
+    // Walk the rest of refp's '::' chain, which V3LinkDot had to leave unresolved because it
+    // runs before refp's class is specialized, and queue the next reference that carries
+    // parameters so this loop deparameterizes it against the right specialization.  Each
+    // queued reference repeats this for the tail after it, so a chain parameterized at
+    // several links, as in 'a#(16)::mid::inner#(7)::t', resolves one link at a time.
+    void queueChainSuccessor(const AstClassOrPackageRef* refp, AstNodeModule* newModp,
+                             const string& genHierName) {
+        AstClass* classp = VN_CAST(newModp, Class);
+        // Leave chains that need nothing from us exactly as they were
+        if (!classp || !chainHasUnresolvedParams(refp)) return;
+        for (const AstNode* prevp = refp; classp;) {
+            AstClassOrPackageRef* const nextp = chainSuccessorp(prevp);
+            if (!nextp) return queueChainTerminal(prevp, classp, genHierName);
+            if (nextp->classOrPackageNodep()) return;
+            AstNode* const memberp = findMemberByName(classp, nextp->name());
+            AstClass* const nextClassp = VN_CAST(memberp, Class);
+            // Leave anything we cannot link for V3LinkDot to resolve or report after V3Param
+            if (!nextClassp) return;
+            if (nextp->paramsp()) {
+                if (!linkPinsToParams(nextp->paramsp(), nextClassp)) return;
+                UINFO(9, "queueChainSuccessor: " << nextp->prettyNameQ() << " -> " << memberp);
+                nextp->classOrPackageNodep(memberp);
+                m_genHierNames.emplace(nextp, genHierName);
+                m_cellps.emplace(true, nextp);
+                return;  // Deparameterizing it resolves the tail after it
+            }
+            nextp->classOrPackageNodep(memberp);
+            prevp = nextp;
+            classp = nextClassp;
+        }
+    }
+
+    // A '::' chain can end at a parameterized class used as a type, as in
+    // 'a#(16)::b#(3) o1;'.  V3LinkDot turns such a reference into an AstClassRefDType, which
+    // V3Param then specializes, but it could not do so here: the name 'b' only resolves once
+    // 'a' is specialized, which happens in this pass.  Do that conversion now and queue the
+    // result, so it is specialized like any other class reference.
+    void queueChainTerminal(const AstNode* lastp, AstClass* classp, const string& genHierName) {
+        AstRefDType* const refDTypep = chainRefDTypep(lastp);
+        if (!refDTypep || !refDTypep->paramsp() || refDTypep->typedefp()
+            || refDTypep->refDTypep()) {
+            return;
+        }
+        AstNode* const memberp = findMemberByName(classp, refDTypep->name());
+        AstClass* const memberClassp = VN_CAST(memberp, Class);
+        // Leave anything we cannot link for V3LinkDot to resolve or report after V3Param
+        if (!memberClassp || !linkPinsToParams(refDTypep->paramsp(), memberClassp)) return;
+        UINFO(9, "queueChainTerminal: " << refDTypep->prettyNameQ() << " -> " << memberp);
+        AstPin* const paramsp = refDTypep->paramsp();
+        paramsp->unlinkFrBackWithNext();
+        AstClassRefDType* const newp
+            = new AstClassRefDType{refDTypep->fileline(), memberClassp, paramsp};
+        newp->classOrPackagep(classp);
+        refDTypep->replaceWith(newp);
+        VL_DO_DANGLING(pushDeletep(refDTypep), refDTypep);
+        m_genHierNames.emplace(newp, genHierName);
+        m_cellps.emplace(true, newp);
     }
 
     // Extract the base reference name from a dotted VarXRef (e.g., "iface.FOO" -> "iface")
