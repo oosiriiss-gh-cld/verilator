@@ -7906,9 +7906,6 @@ packageClassScope<nodeExprp>:   // IEEE: class_scope
         //                      // In this parser <package_identifier>:: and <class_identifier>:: are indistinguishible
                 packageClassScopeList                   { $$ = $1; }
         |       localNextId yP_COLONCOLON               { $$ = $1; }
-        |       dollarUnitNextId yP_COLONCOLON          { $$ = $1; }
-        |       dollarUnitNextId yP_COLONCOLON packageClassScopeList
-                        { $$ = new AstDot{$2, true, $1, $3}; }
         ;
 
 packageClassScopeList<nodeExprp>:   // IEEE: class_type: "id [ parameter_value_assignment ]" but allow yaID__aTYPE
@@ -7918,6 +7915,7 @@ packageClassScopeList<nodeExprp>:   // IEEE: class_type: "id [ parameter_value_a
         //                      // In this parser <package_identifier>:: and <class_identifier>:: are indistinguishible
         //                      // If you follow the rules down, class_type is really a list via ps_class_identifier
                 packageClassScopeItem                   { $$ = $1; }
+        |       dollarUnitNextId yP_COLONCOLON          { $$ = $1; }
         |       packageClassScopeList packageClassScopeItem
                         { $$ = new AstDot{$<fl>2, true, $1, $2}; }
         ;

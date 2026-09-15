@@ -2586,6 +2586,40 @@ class ParamVisitor final : public VNVisitor {
 
     // METHODS
 
+    // Retarget a class reference on the RHS of '::', which V3LinkDot linked inside an
+    // unspecialized parametrized class, to the same named class in the specialized LHS
+    static void retargetDotRhsClassRef(AstClassOrPackageRef* refp) {
+        const AstDot* const dotp = VN_CAST(refp->backp(), Dot);
+        if (!dotp || dotp->rhsp() != refp) return;
+        AstNode* lhsp = dotp->lhsp();
+        if (const AstDot* const lhsDotp = VN_CAST(lhsp, Dot)) lhsp = lhsDotp->rhsp();
+        const AstClassOrPackageRef* const lhsRefp = VN_CAST(lhsp, ClassOrPackageRef);
+        const AstNodeModule* const parentp = lhsRefp ? lhsRefp->classOrPackageSkipp() : nullptr;
+        if (!parentp) return;
+        AstClass* classp = nullptr;
+        for (AstNode* itemp = parentp->stmtsp(); itemp; itemp = itemp->nextp()) {
+            if (VN_IS(itemp, Class) && itemp->name() == refp->name()) {
+                classp = VN_AS(itemp, Class);
+                break;
+            }
+        }
+        if (!classp) return;
+        refp->classOrPackageNodep(classp);
+        // Pins were linked to parameters of the unspecialized class
+        for (AstPin* pinp = refp->paramsp(); pinp; pinp = VN_AS(pinp->nextp(), Pin)) {
+            for (AstNode* itemp = classp->stmtsp(); itemp; itemp = itemp->nextp()) {
+                AstVar* const varp = VN_CAST(itemp, Var);
+                AstParamTypeDType* const typep = VN_CAST(itemp, ParamTypeDType);
+                if (varp && pinp->modVarp() && varp->name() == pinp->modVarp()->name()) {
+                    pinp->modVarp(varp);
+                } else if (typep && pinp->modPTypep()
+                           && typep->name() == pinp->modPTypep()->name()) {
+                    pinp->modPTypep(typep);
+                }
+            }
+        }
+    }
+
     void processWorkQ() {
         UASSERT(!m_iterateModule, "Should not nest");
         std::multimap<ParamState::WQKey, AstNodeModule*> workQueue;
@@ -2646,8 +2680,9 @@ class ParamVisitor final : public VNVisitor {
                 AstNodeModule* srcModp = nullptr;
                 if (const AstCell* modCellp = VN_CAST(cellp, Cell)) {
                     srcModp = modCellp->modp();
-                } else if (const AstClassOrPackageRef* classRefp
+                } else if (AstClassOrPackageRef* const classRefp
                            = VN_CAST(cellp, ClassOrPackageRef)) {
+                    retargetDotRhsClassRef(classRefp);
                     srcModp = classRefp->classOrPackageSkipp();
                     if (VN_IS(classRefp->classOrPackageNodep(), ParamTypeDType)) continue;
                 } else if (const AstClassRefDType* classRefp = VN_CAST(cellp, ClassRefDType)) {
@@ -3238,7 +3273,7 @@ class ParamVisitor final : public VNVisitor {
         AstNode* rhsDefp = nullptr;
         AstClassOrPackageRef* const rhsp = VN_CAST(nodep->rhsp(), ClassOrPackageRef);
         if (rhsp) rhsDefp = rhsp->classOrPackageNodep();
-        if (lhsClassp && rhsDefp) {
+        if (lhsClassp && rhsDefp && !rhsp->paramsp()) {
             m_state.m_dots.push_back(nodep);
             // No need to iterate into rhsp, because there should be nothing to do
         } else {
