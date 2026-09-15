@@ -3481,18 +3481,14 @@ class LinkDotResolveVisitor final : public VNVisitor {
         return isParamedClassRefDType(nodep);
     }
     // Returns true if the reference points to an unspecialized parameterized class, so that
-    // linking must wait until V3Param.  'refDTypep' is the AstRefDType the reference belongs
-    // to; a RefDType directly under a Typedef is resolved now, as the alias itself has to keep
-    // naming the unspecialized class (IEEE 1800-2023 8.25.1).
-    bool deferParamedRef(const AstClassOrPackageRef* const refp, const AstNode* const refDTypep) {
+    // linking must wait until V3Param.  'underTypedef' says the AstRefDType being resolved is
+    // the alias of a typedef declaration, which is resolved now, as the alias itself has to
+    // keep naming the unspecialized class (IEEE 1800-2023 8.25.1).
+    bool deferParamedRef(const AstClassOrPackageRef* const refp, bool underTypedef) {
         const AstClass* const clsp = VN_CAST(refp->classOrPackageNodep(), Class);
-        if (clsp && clsp->hasGParam()) { return true; }
+        if (clsp && clsp->hasGParam()) return true;
         // Defer non-typedef references through typedef aliases of parameterized classes.
-        if (m_statep->forPrimary() && !VN_IS(refDTypep->backp(), Typedef)
-            && isParamedClassRef(refp)) {
-            return true;
-        }
-        return false;
+        return m_statep->forPrimary() && !underTypedef && isParamedClassRef(refp);
     }
     VSymEnt* getThisClassSymp() {
         VSymEnt* classSymp = m_ds.m_dotSymp;
@@ -3673,8 +3669,8 @@ class LinkDotResolveVisitor final : public VNVisitor {
     //  or nullptr when the type couldn't be resolved.
     // Sets 'deferredr' when a parent is an unspecialized parameterized class; the chain is then
     //  resolved inside the unspecialized class and V3Param retargets it to the specialization
-    AstClassOrPackageRef* resolveNestedTypes(const AstDot* const dotp,
-                                             const AstNode* const refDTypep, bool& deferredr) {
+    AstClassOrPackageRef* resolveNestedTypes(const AstDot* const dotp, bool underTypedef,
+                                             bool& deferredr) {
         UASSERT_OBJ(dotp->colon(), dotp, "Dot should be '::' during scope resolution");
         UASSERT_OBJ(VN_IS(dotp->lhsp(), Dot) || VN_IS(dotp->lhsp(), ClassOrPackageRef), dotp,
                     "Dot's LHS should be nested parent type or class/package reference");
@@ -3683,7 +3679,7 @@ class LinkDotResolveVisitor final : public VNVisitor {
 
         AstClassOrPackageRef* parentTypep = VN_CAST(dotp->lhsp(), ClassOrPackageRef);
         if (const AstDot* const lhsDotp = VN_CAST(dotp->lhsp(), Dot)) {
-            parentTypep = resolveNestedTypes(lhsDotp, refDTypep, deferredr);
+            parentTypep = resolveNestedTypes(lhsDotp, underTypedef, deferredr);
         }
         if (!parentTypep) { return nullptr; }
         // Resolve the parent.  visit(AstClassOrPackageRef) searches with fallback only when
@@ -3693,7 +3689,7 @@ class LinkDotResolveVisitor final : public VNVisitor {
         // the DP_PACKAGE assignment above this iterate().
         iterate(parentTypep);
         if (!parentTypep->classOrPackageNodep()) { return nullptr; }
-        if (deferParamedRef(parentTypep, refDTypep)) deferredr = true;
+        if (deferParamedRef(parentTypep, underTypedef)) deferredr = true;
         const AstNodeModule* const parentp = parentTypep->classOrPackageSkipp();
         if (!parentp) { return nullptr; }
         m_ds.m_dotSymp = m_statep->getNodeSym(parentp);
@@ -6115,11 +6111,13 @@ class LinkDotResolveVisitor final : public VNVisitor {
         UINFO(5, indent() << "visit " << nodep);
         if (AstNode* cpackagep = nodep->classOrPackageOpp()) {
             VL_RESTORER_COPY(m_ds);
+            // Constant for the whole '::' chain, so computed once here
+            const bool underTypedef = VN_IS(nodep->backp(), Typedef);
             // Resolve parents of parent
             if (AstDot* dotp = VN_CAST(cpackagep, Dot)) {
                 bool deferred = false;
                 AstClassOrPackageRef* const parentToResolve
-                    = resolveNestedTypes(dotp, nodep, deferred);
+                    = resolveNestedTypes(dotp, underTypedef, deferred);
                 // Couldn't resolve, errors reported earlier
                 if (!parentToResolve) { return; }
                 if (deferred) {
@@ -6142,7 +6140,7 @@ class LinkDotResolveVisitor final : public VNVisitor {
                 // Unresolved, errors reported earlier
                 return;
             }
-            if (deferParamedRef(cpackagerefp, nodep)) { return; }
+            if (deferParamedRef(cpackagerefp, underTypedef)) return;
             const bool doDefaultTypedef = !(m_resolvingTypedef && m_statep->forPrimary());
             if (!cpackagerefp->classOrPackageSkipp(doDefaultTypedef)) {
                 VSymEnt* const foundp = m_statep->resolveClassOrPackage(

@@ -91,6 +91,45 @@ static AstNode* findModuleMemberByName(const AstNodeModule* modp, const string& 
     return nullptr;
 }
 
+// Retarget a reference on the RHS of '::' that V3LinkDot resolved inside an unspecialized
+// parameterized class, so that it names the corresponding member of the specialized LHS.
+// V3LinkDot cannot do this itself: to walk 'A#(P)::B::C' it has to bind A and B to read their
+// symbol tables, and the specializations do not exist before V3Param.  The LinkDot pass that
+// runs after V3Param only resolves references that are still unresolved, so this retarget is
+// what makes that pass descend into the specialized symbol tables.
+// Requires the LHS to be specialized already, which holds at both call sites: in processWorkQ
+// the LHS reference is queued, and so dequeued, before the RHS; relinkDots runs once all
+// specialization is done.  Retargeting an already retargeted reference is a no-op.
+static void retargetDotRhsClassRef(AstClassOrPackageRef* refp) {
+    const AstDot* const dotp = VN_CAST(refp->backp(), Dot);
+    if (!dotp || dotp->rhsp() != refp) return;
+    // In a chain the LHS is itself a Dot, whose RHS names the immediate parent
+    AstNode* lhsp = dotp->lhsp();
+    if (const AstDot* const lhsDotp = VN_CAST(lhsp, Dot)) lhsp = lhsDotp->rhsp();
+    const AstClassOrPackageRef* const lhsRefp = VN_CAST(lhsp, ClassOrPackageRef);
+    const AstNodeModule* const parentp = lhsRefp ? lhsRefp->classOrPackageSkipp() : nullptr;
+    if (!parentp) return;
+    AstNode* const foundp = findModuleMemberByName(parentp, refp->name());
+    if (!foundp) return;
+    refp->classOrPackageNodep(foundp);
+    AstClass* const classp = VN_CAST(foundp, Class);
+    if (!classp) return;
+    // Pins were linked to the parameters of the unspecialized class
+    for (AstPin* pinp = refp->paramsp(); pinp; pinp = VN_AS(pinp->nextp(), Pin)) {
+        if (const AstVar* const modVarp = pinp->modVarp()) {
+            if (AstVar* const varp
+                = VN_CAST(findModuleMemberByName(classp, modVarp->name()), Var)) {
+                pinp->modVarp(varp);
+            }
+        } else if (const AstParamTypeDType* const modPTypep = pinp->modPTypep()) {
+            if (AstParamTypeDType* const typep
+                = VN_CAST(findModuleMemberByName(classp, modPTypep->name()), ParamTypeDType)) {
+                pinp->modPTypep(typep);
+            }
+        }
+    }
+}
+
 //######################################################################
 // Hierarchical block and parameter db (modules without parameters are also handled)
 
@@ -2598,36 +2637,6 @@ class ParamVisitor final : public VNVisitor {
 
     // METHODS
 
-    // Retarget a class reference on the RHS of '::', which V3LinkDot linked inside an
-    // unspecialized parameterized class, to the same named class in the specialized LHS.
-    // Relies on the LHS already being specialized when this ref is dequeued in processWorkQ.
-    static void retargetDotRhsClassRef(AstClassOrPackageRef* refp) {
-        const AstDot* const dotp = VN_CAST(refp->backp(), Dot);
-        if (!dotp || dotp->rhsp() != refp) return;
-        AstNode* lhsp = dotp->lhsp();
-        if (const AstDot* const lhsDotp = VN_CAST(lhsp, Dot)) lhsp = lhsDotp->rhsp();
-        const AstClassOrPackageRef* const lhsRefp = VN_CAST(lhsp, ClassOrPackageRef);
-        const AstNodeModule* const parentp = lhsRefp ? lhsRefp->classOrPackageSkipp() : nullptr;
-        if (!parentp) return;
-        AstClass* const classp = VN_CAST(findModuleMemberByName(parentp, refp->name()), Class);
-        if (!classp) return;
-        refp->classOrPackageNodep(classp);
-        // Pins were linked to the parameters of the unspecialized class
-        for (AstPin* pinp = refp->paramsp(); pinp; pinp = VN_AS(pinp->nextp(), Pin)) {
-            if (const AstVar* const modVarp = pinp->modVarp()) {
-                if (AstVar* const varp
-                    = VN_CAST(findModuleMemberByName(classp, modVarp->name()), Var)) {
-                    pinp->modVarp(varp);
-                }
-            } else if (const AstParamTypeDType* const modPTypep = pinp->modPTypep()) {
-                if (AstParamTypeDType* const typep
-                    = VN_CAST(findModuleMemberByName(classp, modPTypep->name()), ParamTypeDType)) {
-                    pinp->modPTypep(typep);
-                }
-            }
-        }
-    }
-
     void processWorkQ() {
         UASSERT(!m_iterateModule, "Should not nest");
         std::multimap<ParamState::WQKey, AstNodeModule*> workQueue;
@@ -3282,8 +3291,11 @@ class ParamVisitor final : public VNVisitor {
         AstClassOrPackageRef* const rhsp = VN_CAST(nodep->rhsp(), ClassOrPackageRef);
         if (rhsp) rhsDefp = rhsp->classOrPackageNodep();
         if (lhsClassp && rhsDefp && !rhsp->paramsp()) {
+            // Retargeted by relinkDots, once the LHS has been specialized.  Nothing else to do,
+            // so no need to iterate into rhsp.  A reference that carries pins does need
+            // iterating, as it has to be specialized itself, and is then retargeted earlier, in
+            // processWorkQ, where its target selects what gets specialized.
             m_state.m_dots.push_back(nodep);
-            // No need to iterate into rhsp, because there should be nothing to do
         } else {
             iterate(nodep->rhsp());
         }
@@ -3508,12 +3520,7 @@ class ParamTop final : VNDeleter {
     void relinkDots() {
         // RHSs of AstDots need a relink when LHS is a parameterized class reference
         for (AstDot* const dotp : m_state.m_dots) {
-            const AstClassOrPackageRef* const classRefp = VN_AS(dotp->lhsp(), ClassOrPackageRef);
-            const AstClass* const lhsClassp = VN_AS(classRefp->classOrPackageSkipp(), Class);
-            AstClassOrPackageRef* const rhsp = VN_AS(dotp->rhsp(), ClassOrPackageRef);
-            if (AstNode* const foundp = findModuleMemberByName(lhsClassp, rhsp->name())) {
-                rhsp->classOrPackageNodep(foundp);
-            }
+            retargetDotRhsClassRef(VN_AS(dotp->rhsp(), ClassOrPackageRef));
         }
     }
 
