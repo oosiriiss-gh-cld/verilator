@@ -79,6 +79,18 @@ static AstClassRefDType* classRefDTypeOfNode(AstNode* nodep) {
     return dtp ? VN_CAST(dtp->skipRefOrNullp(), ClassRefDType) : nullptr;
 }
 
+// Find a member declared directly in 'modp' by name.
+// Specializing a parameterized class clones it keeping the same member names, so this maps a
+// reference that was resolved against the unspecialized class onto the specialized member.
+// VMemberMap is deliberately not used here: AstClass::isCacheableChild() excludes nested
+// AstClass and AstParamTypeDType, which are exactly what the callers below look up.
+static AstNode* findModuleMemberByName(const AstNodeModule* modp, const string& name) {
+    for (AstNode* itemp = modp->stmtsp(); itemp; itemp = itemp->nextp()) {
+        if (itemp->name() == name) return itemp;
+    }
+    return nullptr;
+}
+
 //######################################################################
 // Hierarchical block and parameter db (modules without parameters are also handled)
 
@@ -2587,7 +2599,8 @@ class ParamVisitor final : public VNVisitor {
     // METHODS
 
     // Retarget a class reference on the RHS of '::', which V3LinkDot linked inside an
-    // unspecialized parametrized class, to the same named class in the specialized LHS
+    // unspecialized parameterized class, to the same named class in the specialized LHS.
+    // Relies on the LHS already being specialized when this ref is dequeued in processWorkQ.
     static void retargetDotRhsClassRef(AstClassOrPackageRef* refp) {
         const AstDot* const dotp = VN_CAST(refp->backp(), Dot);
         if (!dotp || dotp->rhsp() != refp) return;
@@ -2596,24 +2609,19 @@ class ParamVisitor final : public VNVisitor {
         const AstClassOrPackageRef* const lhsRefp = VN_CAST(lhsp, ClassOrPackageRef);
         const AstNodeModule* const parentp = lhsRefp ? lhsRefp->classOrPackageSkipp() : nullptr;
         if (!parentp) return;
-        AstClass* classp = nullptr;
-        for (AstNode* itemp = parentp->stmtsp(); itemp; itemp = itemp->nextp()) {
-            if (VN_IS(itemp, Class) && itemp->name() == refp->name()) {
-                classp = VN_AS(itemp, Class);
-                break;
-            }
-        }
+        AstClass* const classp = VN_CAST(findModuleMemberByName(parentp, refp->name()), Class);
         if (!classp) return;
         refp->classOrPackageNodep(classp);
-        // Pins were linked to parameters of the unspecialized class
+        // Pins were linked to the parameters of the unspecialized class
         for (AstPin* pinp = refp->paramsp(); pinp; pinp = VN_AS(pinp->nextp(), Pin)) {
-            for (AstNode* itemp = classp->stmtsp(); itemp; itemp = itemp->nextp()) {
-                AstVar* const varp = VN_CAST(itemp, Var);
-                AstParamTypeDType* const typep = VN_CAST(itemp, ParamTypeDType);
-                if (varp && pinp->modVarp() && varp->name() == pinp->modVarp()->name()) {
+            if (const AstVar* const modVarp = pinp->modVarp()) {
+                if (AstVar* const varp
+                    = VN_CAST(findModuleMemberByName(classp, modVarp->name()), Var)) {
                     pinp->modVarp(varp);
-                } else if (typep && pinp->modPTypep()
-                           && typep->name() == pinp->modPTypep()->name()) {
+                }
+            } else if (const AstParamTypeDType* const modPTypep = pinp->modPTypep()) {
+                if (AstParamTypeDType* const typep
+                    = VN_CAST(findModuleMemberByName(classp, modPTypep->name()), ParamTypeDType)) {
                     pinp->modPTypep(typep);
                 }
             }
@@ -3503,11 +3511,8 @@ class ParamTop final : VNDeleter {
             const AstClassOrPackageRef* const classRefp = VN_AS(dotp->lhsp(), ClassOrPackageRef);
             const AstClass* const lhsClassp = VN_AS(classRefp->classOrPackageSkipp(), Class);
             AstClassOrPackageRef* const rhsp = VN_AS(dotp->rhsp(), ClassOrPackageRef);
-            for (auto* itemp = lhsClassp->membersp(); itemp; itemp = itemp->nextp()) {
-                if (itemp->name() == rhsp->name()) {
-                    rhsp->classOrPackageNodep(itemp);
-                    break;
-                }
+            if (AstNode* const foundp = findModuleMemberByName(lhsClassp, rhsp->name())) {
+                rhsp->classOrPackageNodep(foundp);
             }
         }
     }

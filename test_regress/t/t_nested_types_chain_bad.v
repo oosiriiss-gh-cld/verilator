@@ -41,7 +41,7 @@ module t;
   pkg::nested1::bad_type::nested3 n3;
   // Unknown final type
   pkg::nested1::bad_type n4;
-  // Parametrized class without #()
+  // Parameterized class without #()
   pkg::nested1::nested21::nested3::nested4 n5;
   F f ();
 endmodule

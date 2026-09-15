@@ -23,7 +23,7 @@ package pkg;
           int x = 4;
         endclass
       endclass
-      // Typedefed parametrized class defaults to '#()' specialization (IEEE 1800-2023 8.25.1)
+      // Typedefed parameterized class defaults to '#()' specialization (IEEE 1800-2023 8.25.1)
       typedef nested3 nested3_def;
     endclass
     class nested22;
