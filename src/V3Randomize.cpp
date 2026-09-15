@@ -1014,14 +1014,25 @@ class ConstraintExprVisitor final : public VNVisitor {
         handle.relink(getConstFormat(nodep));
         return true;
     }
-    AstNodeExpr* wrapWithCond(AstNodeExpr* const exprp, AstNodeExpr* const condp,
-                              const int width) {
+    // Wrap an already-SMT-formatted expression in a runtime guard selecting either
+    // the expression or a constant, for indices that may be out of range.
+    // randDependent must be the user1 mark of the expression as it was BEFORE
+    // iteration converted it to SMT text: the conversion replaces the rand
+    // variable reference with a textual name, so the mark cannot be recovered
+    // from the formatted node or its children afterwards.
+    AstNodeExpr* wrapWithCond(AstNodeExpr* const exprp, AstNodeExpr* const condp, const int width,
+                              const bool randDependent) {
         if (condp) {
             FileLine* const flp = exprp->fileline();
-            AstCond* condWrapperp = new AstCond{
+            // A guard is only ever built for a select on a rand class-handle array, so
+            // the guarded expression is rand-dependent. Were it not, the AstCond below
+            // would be left unmarked, and editFormat() would fold this string-valued
+            // node into a "#x%x" of the string itself.
+            UASSERT_OBJ(randDependent, exprp, "Guarded constraint expression not rand-dependent");
+            AstCond* const condWrapperp = new AstCond{
                 flp, condp, exprp,
                 getConstFormat(new AstConst{flp, AstConst::WidthedValue{}, width, 0})};
-            condWrapperp->user1(true);  // Mark as formatted
+            condWrapperp->user1(randDependent);
             return condWrapperp;
         }
         return exprp;
@@ -1038,6 +1049,9 @@ class ConstraintExprVisitor final : public VNVisitor {
         const int lhsWidth = lhsp ? lhsp->width() : 0;
         const int rhsWidth = rhsp ? rhsp->width() : 0;
         const int thsWidth = thsp ? thsp->width() : 0;
+        const bool lhsRand = lhsp && lhsp->user1();
+        const bool rhsRand = rhsp && rhsp->user1();
+        const bool thsRand = thsp && thsp->user1();
         AstNodeExpr* lhsCondp = nullptr;
         AstNodeExpr* rhsCondp = nullptr;
         AstNodeExpr* thsCondp = nullptr;
@@ -1073,19 +1087,22 @@ class ConstraintExprVisitor final : public VNVisitor {
                 case 'l':
                     pos[0] = 's';
                     UASSERT_OBJ(lhsp, nodep, "emitSMT() references undef node");
-                    argsp = AstNode::addNext(argsp, wrapWithCond(lhsp, lhsCondp, lhsWidth));
+                    argsp
+                        = AstNode::addNext(argsp, wrapWithCond(lhsp, lhsCondp, lhsWidth, lhsRand));
                     lhsp = nullptr;
                     break;
                 case 'r':
                     pos[0] = 's';
                     UASSERT_OBJ(rhsp, nodep, "emitSMT() references undef node");
-                    argsp = AstNode::addNext(argsp, wrapWithCond(rhsp, rhsCondp, rhsWidth));
+                    argsp
+                        = AstNode::addNext(argsp, wrapWithCond(rhsp, rhsCondp, rhsWidth, rhsRand));
                     rhsp = nullptr;
                     break;
                 case 't':
                     pos[0] = 's';
                     UASSERT_OBJ(thsp, nodep, "emitSMT() references undef node");
-                    argsp = AstNode::addNext(argsp, wrapWithCond(thsp, thsCondp, thsWidth));
+                    argsp
+                        = AstNode::addNext(argsp, wrapWithCond(thsp, thsCondp, thsWidth, thsRand));
                     thsp = nullptr;
                     break;
                 default: nodep->v3fatalSrc("Unknown emitSMT format code: %" << pos[0]); break;
@@ -2665,8 +2682,10 @@ class ConstraintExprVisitor final : public VNVisitor {
             VL_RESTORER(m_conditionp);
             m_conditionp = nullptr;
             const int32_t exprWidth = nodep->exprp()->width();
+            const bool exprRand = nodep->exprp()->user1();
             iterateChildren(nodep);
-            nodep->exprp(wrapWithCond(nodep->exprp()->unlinkFrBack(), m_conditionp, exprWidth));
+            nodep->exprp(
+                wrapWithCond(nodep->exprp()->unlinkFrBack(), m_conditionp, exprWidth, exprRand));
         }
         if (m_wantSingle) {
             nodep->replaceWith(nodep->exprp()->unlinkFrBack());
@@ -2964,11 +2983,12 @@ class ConstraintExprVisitor final : public VNVisitor {
                 cstmtp->add("ret = \"(" + std::string(smtOp) + " \" + ret + \" \";\n");
                 cstmtp->add("ret += ");
                 const int32_t elemWidth = perElemExprp->width();
+                const bool elemRand = perElemExprp->user1();
                 VL_RESTORER(m_conditionp);
                 m_conditionp = nullptr;
                 AstNodeExpr* const elemExprp
                     = VN_AS(iterateSubtreeReturnEdits(perElemExprp), NodeExpr);
-                cstmtp->add(wrapWithCond(elemExprp, m_conditionp, elemWidth));
+                cstmtp->add(wrapWithCond(elemExprp, m_conditionp, elemWidth, elemRand));
                 cstmtp->add(";\n");
                 cstmtp->add("ret += \")\";\n");
             } else {
