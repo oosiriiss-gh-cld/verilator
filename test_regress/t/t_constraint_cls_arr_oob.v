@@ -4,7 +4,7 @@
 // SPDX-FileCopyrightText: 2026 Antmicro
 // SPDX-License-Identifier: CC0-1.0
 
-`define ITEMS_SIZE 8
+`define ITEMS_SIZE 7
 
 class item_t;
   rand bit [7:0] value;

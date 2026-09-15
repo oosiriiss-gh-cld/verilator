@@ -1019,10 +1019,12 @@ class ConstraintExprVisitor final : public VNVisitor {
                               const int width) {
         if (condp) {
             FileLine* const flp = exprp->fileline();
-            AstCond* condWrapperp = new AstCond{
+            AstCond* const condWrapperp = new AstCond{
                 flp, condp, exprp,
                 getConstFormat(new AstConst{flp, AstConst::WidthedValue{}, width, 0})};
-            condWrapperp->user1(true);
+            // Branches are already-formatted SMT strings; keep editFormat() from
+            // const-folding them when the node is re-visited (editSingle path)
+            condWrapperp->user1(true);  // Mark as formatted
             return condWrapperp;
         }
         return exprp;
@@ -2207,15 +2209,15 @@ class ConstraintExprVisitor final : public VNVisitor {
             if (m_structSel) {
                 const AstUnpackArrayDType* const arrDtypep
                     = VN_AS(nodep->fromp()->dtypep()->skipRefp(), UnpackArrayDType);
-                const uint32_t size = arrDtypep->elementsConst();
-                const int32_t sizeNeededBits = V3Number::log2b(size) + 1;
-                const bool isSizePowerOf2 = (sizeNeededBits & (sizeNeededBits - 1)) == 0;
-                const int32_t cmpWidth = (isSizePowerOf2) ? sizeNeededBits + 1 : sizeNeededBits;
-                // Index truncated, unsigned Lt is enough
-                AstNodeExpr* const condp
-                    = new AstLt{fl, bitp->cloneTreePure(false),
-                                new AstConst{fl, AstConst::WidthedValue{}, cmpWidth, size}};
-                m_conditionp = m_conditionp ? new AstLogAnd{fl, m_conditionp, condp} : condp;
+                const uint32_t maxIndex = arrDtypep->elementsConst() - 1;
+                const bool alwaysInRange
+                    = (bitp->width() < 32) && maxIndex >= ((1U << bitp->width()) - 1);
+                if (!alwaysInRange) {
+                    AstNodeExpr* const condp = new AstLte{
+                        fl, bitp->cloneTreePure(false),
+                        new AstConst{fl, AstConst::WidthedValue{}, bitp->width(), maxIndex}};
+                    m_conditionp = m_conditionp ? new AstLogAnd{fl, m_conditionp, condp} : condp;
+                }
             }
             AstNodeExpr* const indexp = new AstSFormatF{fl, "#x%8x", false, bitp};
             handle.relink(indexp);
@@ -2656,9 +2658,12 @@ class ConstraintExprVisitor final : public VNVisitor {
             if (exprp->width() > 1) {
                 FileLine* const fl = exprp->fileline();
                 const V3Number numZero{fl, exprp->width(), 0};
+                const bool randDependent = exprp->user1();
                 AstNodeExpr* const neqp
                     = new AstNeq{fl, exprp->unlinkFrBack(), new AstConst{fl, numZero}};
-                neqp->user1(true);  // Mark as rand-dependent for SMT path
+                // Freshly created node: inherit rand-dependence from the operand,
+                // otherwise editFormat() would const-fold a rand-dependent compare
+                neqp->user1(randDependent);
                 nodep->exprp(neqp);
             }
         }
