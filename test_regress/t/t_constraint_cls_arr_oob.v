@@ -19,6 +19,10 @@ class container;
   constraint less_c {foreach (items[i]) if (i !== 0) items[i-1].value < 110;}
   constraint greater_c {foreach (items[i]) if (i < `ITEMS_SIZE - 1) items[i+1].value > 50;}
   constraint bit_expr_c {foreach (items[i]) if (i !== 0) items[i-1].flag1;}
+  // Unconditional: the index is out of range for the last element, and the 1-bit
+  // element is the whole constraint expression, so the out-of-range substitution
+  // must leave the constraint satisfied rather than violate it
+  constraint bit_oob_c {foreach (items[i]) items[i+1].flag2;}
   constraint arr_index_not_wide_c {items.xor() with (item.value) != 0;}
   constraint chained_condition {foreach (items[i]) non_rand_cond ? items[i].flag1 : items[i].flag2;}
   function new(bit cond);
@@ -38,6 +42,7 @@ module t;
       end
       if (i < `ITEMS_SIZE - 1) begin
         if (c.items[i+1].value <= 50) $stop;
+        if (c.items[i+1].flag2 !== 1'b1) $stop;
       end
     end
     $write("*-* All Finished *-*\n");

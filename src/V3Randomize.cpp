@@ -1014,14 +1014,30 @@ class ConstraintExprVisitor final : public VNVisitor {
         handle.relink(getConstFormat(nodep));
         return true;
     }
+    // Value substituted for an out-of-range element by wrapWithCond(). Which value is
+    // neutral depends on where the guarded expression sits.
+    enum class OutOfRange : uint8_t {
+        ZERO,  // An out-of-range element reads as zero (operand of a larger expression)
+        ONE,  // Vacuously satisfied constraint, or the identity of a 'bvmul' reduction
+        ALL_ONES  // Identity of a 'bvand' reduction
+    };
+    AstNodeExpr* outOfRangeFormat(FileLine* const flp, const int width, const OutOfRange kind) {
+        if (kind == OutOfRange::ALL_ONES) {
+            V3Number num{flp, width, 0};
+            num.setAllBits1();
+            return getConstFormat(new AstConst{flp, num});
+        }
+        return getConstFormat(
+            new AstConst{flp, AstConst::WidthedValue{}, width, kind == OutOfRange::ONE ? 1U : 0U});
+    }
     // Wrap an already-SMT-formatted expression in a runtime guard selecting either
-    // the expression or a constant, for indices that may be out of range.
+    // the expression or the neutral value for an out-of-range index.
     // randDependent must be the user1 mark of the expression as it was BEFORE
     // iteration converted it to SMT text: the conversion replaces the rand
     // variable reference with a textual name, so the mark cannot be recovered
     // from the formatted node or its children afterwards.
     AstNodeExpr* wrapWithCond(AstNodeExpr* const exprp, AstNodeExpr* const condp, const int width,
-                              const bool randDependent) {
+                              const bool randDependent, const OutOfRange kind) {
         if (condp) {
             FileLine* const flp = exprp->fileline();
             // A guard is only ever built for a select on a rand class-handle array, so
@@ -1029,9 +1045,8 @@ class ConstraintExprVisitor final : public VNVisitor {
             // would be left unmarked, and editFormat() would fold this string-valued
             // node into a "#x%x" of the string itself.
             UASSERT_OBJ(randDependent, exprp, "Guarded constraint expression not rand-dependent");
-            AstCond* const condWrapperp = new AstCond{
-                flp, condp, exprp,
-                getConstFormat(new AstConst{flp, AstConst::WidthedValue{}, width, 0})};
+            AstCond* const condWrapperp
+                = new AstCond{flp, condp, exprp, outOfRangeFormat(flp, width, kind)};
             condWrapperp->user1(randDependent);
             return condWrapperp;
         }
@@ -1087,22 +1102,22 @@ class ConstraintExprVisitor final : public VNVisitor {
                 case 'l':
                     pos[0] = 's';
                     UASSERT_OBJ(lhsp, nodep, "emitSMT() references undef node");
-                    argsp
-                        = AstNode::addNext(argsp, wrapWithCond(lhsp, lhsCondp, lhsWidth, lhsRand));
+                    argsp = AstNode::addNext(
+                        argsp, wrapWithCond(lhsp, lhsCondp, lhsWidth, lhsRand, OutOfRange::ZERO));
                     lhsp = nullptr;
                     break;
                 case 'r':
                     pos[0] = 's';
                     UASSERT_OBJ(rhsp, nodep, "emitSMT() references undef node");
-                    argsp
-                        = AstNode::addNext(argsp, wrapWithCond(rhsp, rhsCondp, rhsWidth, rhsRand));
+                    argsp = AstNode::addNext(
+                        argsp, wrapWithCond(rhsp, rhsCondp, rhsWidth, rhsRand, OutOfRange::ZERO));
                     rhsp = nullptr;
                     break;
                 case 't':
                     pos[0] = 's';
                     UASSERT_OBJ(thsp, nodep, "emitSMT() references undef node");
-                    argsp
-                        = AstNode::addNext(argsp, wrapWithCond(thsp, thsCondp, thsWidth, thsRand));
+                    argsp = AstNode::addNext(
+                        argsp, wrapWithCond(thsp, thsCondp, thsWidth, thsRand, OutOfRange::ZERO));
                     thsp = nullptr;
                     break;
                 default: nodep->v3fatalSrc("Unknown emitSMT format code: %" << pos[0]); break;
@@ -2684,8 +2699,13 @@ class ConstraintExprVisitor final : public VNVisitor {
             const int32_t exprWidth = nodep->exprp()->width();
             const bool exprRand = nodep->exprp()->user1();
             iterateChildren(nodep);
-            nodep->exprp(
-                wrapWithCond(nodep->exprp()->unlinkFrBack(), m_conditionp, exprWidth, exprRand));
+            // Here the guarded expression is the whole constraint, which the runtime
+            // asserts equal to #b1, so zero would not stand in for a missing element --
+            // it would make randomize() fail on the entire object. Only the 1-bit case
+            // reaches this point: a wider bare expression got an "!= 0" above, and the
+            // guard is then consumed around that comparison's operand in editSMT().
+            nodep->exprp(wrapWithCond(nodep->exprp()->unlinkFrBack(), m_conditionp, exprWidth,
+                                      exprRand, OutOfRange::ONE));
         }
         if (m_wantSingle) {
             nodep->replaceWith(nodep->exprp()->unlinkFrBack());
@@ -2988,7 +3008,14 @@ class ConstraintExprVisitor final : public VNVisitor {
                 m_conditionp = nullptr;
                 AstNodeExpr* const elemExprp
                     = VN_AS(iterateSubtreeReturnEdits(perElemExprp), NodeExpr);
-                cstmtp->add(wrapWithCond(elemExprp, m_conditionp, elemWidth, elemRand));
+                // Substitute the reduction's identity element for a missing element
+                const OutOfRange elemOutOfRange
+                    = nodep->method() == VCMethod::ARRAY_R_AND
+                          ? OutOfRange::ALL_ONES
+                          : (nodep->method() == VCMethod::ARRAY_R_PRODUCT ? OutOfRange::ONE
+                                                                          : OutOfRange::ZERO);
+                cstmtp->add(
+                    wrapWithCond(elemExprp, m_conditionp, elemWidth, elemRand, elemOutOfRange));
                 cstmtp->add(";\n");
                 cstmtp->add("ret += \")\";\n");
             } else {
