@@ -17,7 +17,9 @@ typical edit.
 
 The hypothesis under test comes from the emit code:
 
-    V<prefix>__pch.h  ->  V<prefix>__Syms.h  ->  every non-class module header
+```
+V<prefix>__pch.h  ->  V<prefix>__Syms.h  ->  every non-class module header
+```
 
 Every generated implementation file includes `__pch.h`
 (`src/V3EmitCImp.cpp:46`, `src/V3EmitCModel.cpp:697`, `src/V3EmitCSyms.cpp:1100`),
