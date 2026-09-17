@@ -5998,6 +5998,35 @@ class LinkDotResolveVisitor final : public VNVisitor {
         }
         m_ds.m_dotSymp = VL_RESTORER_PREV(m_curSymp);
     }
+    // Resolve the '::' scope prefix of a type reference to the class/package it names.
+    // The prefix is a single AstClassOrPackageRef, or for 'A::B::t' a left-nested AstDot
+    // chain of them.  Each segment is looked up inside the segment to its left, the same
+    // way visit(AstDot*) walks a scope chain in an expression.  Returns null when a
+    // segment cannot be resolved, or names a class that V3Param has yet to specialize.
+    AstNodeModule* resolveTypeScopeChain(AstNode* scopep, VSymEnt* lookSymp, bool fallback) {
+        if (AstClassOrPackageRef* const refp = VN_CAST(scopep, ClassOrPackageRef)) {
+            {
+                // Resolve the segment and link any #() pins on it, in the scope of the
+                // segment to its left.  DP_PACKAGE suppresses the fallback search, so a
+                // later segment only matches a member of the class before it.
+                VL_RESTORER_COPY(m_ds);
+                m_ds.init(lookSymp);
+                if (!fallback) m_ds.m_dotPos = DP_PACKAGE;
+                iterate(refp);
+            }
+            if (!refp->classOrPackageSkipp()) return nullptr;
+            // A parameterized class has no members to look up until it is specialized.
+            const AstClass* const classp = VN_CAST(refp->classOrPackageNodep(), Class);
+            if (classp && classp->hasGParam()) return nullptr;
+            return refp->classOrPackageSkipp();
+        }
+        const AstDot* const dotp = VN_CAST(scopep, Dot);
+        if (!dotp || !dotp->colon()) return nullptr;
+        AstNodeModule* const lhsModp = resolveTypeScopeChain(dotp->lhsp(), lookSymp, fallback);
+        if (!lhsModp) return nullptr;
+        // Later segments name a member of the segment to their left, so no fallback search.
+        return resolveTypeScopeChain(dotp->rhsp(), m_statep->getNodeSym(lhsModp), false);
+    }
     void visit(AstRefDType* nodep) override {
 
         if (auto* const typeOfp = nodep->typeofp()) {
@@ -6105,6 +6134,15 @@ class LinkDotResolveVisitor final : public VNVisitor {
                         << "'\n"
                         << cpackagerefp->warnMore() + "... Suggest '.' instead of '::'");
                 }
+            } else if (VN_IS(cpackagep, Dot)) {
+                // Multi-segment scope, e.g. 'A::B::t'
+                AstNodeModule* const scopeModp
+                    = resolveTypeScopeChain(cpackagep, m_ds.m_dotSymp, true);
+                // Null means either an error was already reported, or a segment is a
+                // parameterized class.  Leave the chain in place for V3Param, which
+                // specializes it and re-resolves in resolveParamClassRefDType.
+                if (!scopeModp) return;
+                nodep->classOrPackagep(scopeModp);
             } else {
                 cpackagep->v3warn(E_UNSUPPORTED,
                                   "Unsupported: Multiple '::' package/class reference");

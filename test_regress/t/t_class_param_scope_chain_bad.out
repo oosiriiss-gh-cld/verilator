@@ -1,0 +1,10 @@
+%Error: t/t_class_param_scope_chain_bad.v:22:12: Package/class for ':: reference' not found: 'nosuch_t'
+                                               : ... note: In instance 't'
+   22 |   Mid#(6)::nosuch_t::data_t a;   
+      |            ^~~~~~~~
+        ... See the manual at https://verilator.org/verilator_doc.html?v=latest for more assistance.
+%Error: t/t_class_param_scope_chain_bad.v:23:20: Can't find typedef/interface: 'nosuch_t'
+                                               : ... note: In instance 't'
+   23 |   Mid#(6)::leaf_t::nosuch_t b;   
+      |                    ^~~~~~~~
+%Error: Exiting due to

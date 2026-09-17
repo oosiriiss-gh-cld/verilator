@@ -1196,18 +1196,22 @@ class ParamProcessor final {
         }
     }
 
-    // Helper to resolve DOT to RefDType for class type references.
-    // If the class is parameterized and not yet specialized, specialize it first.
-    // This handles cases like: iface #(param_class#(value)::typedef_name)
-    void resolveDotToTypedef(AstNode* exprp) {
-        AstDot* const dotp = VN_CAST(exprp, Dot);
-        if (!dotp) return;
-        AstClassOrPackageRef* const classRefp = VN_CAST(dotp->lhsp(), ClassOrPackageRef);
-        if (!classRefp) return;
-        AstParseRef* const parseRefp = VN_CAST(dotp->rhsp(), ParseRef);
-        if (!parseRefp) return;
-
-        const AstClass* lhsClassp = VN_CAST(classRefp->classOrPackageSkipp(), Class);
+    // Resolve one `::` scope segment to the class it names, specializing it first if it
+    // is still a parameterized template.  enclosingClassp is the already-specialized
+    // class to the left of this segment, or null for the leftmost segment.
+    AstClass* resolveScopeSegment(AstClassOrPackageRef* classRefp, AstClass* enclosingClassp) {
+        // A non-leftmost segment names a member of the class to its left.  V3LinkDot
+        // either could not bind it (the parent was still a template) or bound it to the
+        // template's member, so rebind to the specialized parent's own member.
+        if (enclosingClassp) {
+            if (AstNode* const memberp
+                = m_memberMap.findMember(enclosingClassp, classRefp->name())) {
+                if (memberp != classRefp->classOrPackageNodep()) {
+                    classRefp->classOrPackageNodep(memberp);
+                }
+            }
+        }
+        AstClass* lhsClassp = VN_CAST(classRefp->classOrPackageSkipp(), Class);
 
         // Specialize parameterized class through type parameter indirection (#7000)
         AstParamTypeDType* const paramTypep
@@ -1245,14 +1249,46 @@ class ParamProcessor final {
                 }
             }
         }
+        return lhsClassp;
+    }
+
+    // Resolve a `::` scope prefix to the class it names.  The prefix is either a single
+    // AstClassOrPackageRef, or - for `A::B::C` - a left-nested AstDot chain of them, as
+    // built by verilog.y's packageClassScopeList.  Each segment is specialized before the
+    // next is looked up inside it, mirroring LinkDotResolveVisitor::visit(AstDot*), which
+    // resolves the lhs scope before using it to resolve the rhs.
+    AstClass* resolveScopeChain(AstNode* scopep) {
+        if (AstClassOrPackageRef* const classRefp = VN_CAST(scopep, ClassOrPackageRef)) {
+            return resolveScopeSegment(classRefp, nullptr);
+        }
+        const AstDot* const dotp = VN_CAST(scopep, Dot);
+        if (!dotp || !dotp->colon()) return nullptr;
+        AstClass* const lhsClassp = resolveScopeChain(dotp->lhsp());
+        if (!lhsClassp) return nullptr;
+        AstClassOrPackageRef* const rhsRefp = VN_CAST(dotp->rhsp(), ClassOrPackageRef);
+        if (!rhsRefp) return nullptr;
+        return resolveScopeSegment(rhsRefp, lhsClassp);
+    }
+
+    // Helper to resolve DOT to RefDType for class type references.
+    // If the class is parameterized and not yet specialized, specialize it first.
+    // This handles cases like: iface #(param_class#(value)::typedef_name)
+    void resolveDotToTypedef(AstNode* exprp) {
+        AstDot* const dotp = VN_CAST(exprp, Dot);
+        if (!dotp) return;
+        AstParseRef* const parseRefp = VN_CAST(dotp->rhsp(), ParseRef);
+        if (!parseRefp) return;
+        const AstClass* const lhsClassp = resolveScopeChain(dotp->lhsp());
         if (!lhsClassp) return;
 
         AstNode* const memberp = m_memberMap.findMember(lhsClassp, parseRefp->name());
+        // Deletion is deferred: a multi-segment scope nests further Dots under this one,
+        // and ParamState::m_dots may still hold them for relinkDots().
         if (AstTypedef* const tdefp = VN_CAST(memberp, Typedef)) {
             AstRefDType* const refp = new AstRefDType{dotp->fileline(), tdefp->name()};
             refp->typedefp(tdefp);
             dotp->replaceWith(refp);
-            VL_DO_DANGLING(dotp->deleteTree(), dotp);
+            VL_DO_DANGLING(m_deleter.pushDeletep(dotp), dotp);
         } else if (AstVar* const varp = VN_CAST(memberp, Var)) {
             // Param/lparam member: substitute its constant value so the caller's constify can
             // succeed.
@@ -1260,7 +1296,7 @@ class ParamProcessor final {
                 if (!VN_IS(varp->valuep(), Const)) V3Const::constifyParamsEdit(varp);
                 if (AstConst* const constp = VN_CAST(varp->valuep(), Const)) {
                     dotp->replaceWith(constp->cloneTree(false));
-                    VL_DO_DANGLING(dotp->deleteTree(), dotp);
+                    VL_DO_DANGLING(m_deleter.pushDeletep(dotp), dotp);
                 }
             }
         }
@@ -1283,7 +1319,18 @@ class ParamProcessor final {
 
         AstClassOrPackageRef* const classRefp
             = VN_CAST(refp->classOrPackageOpp(), ClassOrPackageRef);
-        if (!classRefp) return;
+        if (!classRefp) {
+            // Multi-segment scope (`A::B::t`).  classRefDeparam only patches a parent
+            // RefDType when the ref is its direct child, so bind the typedef here.
+            AstClass* const scopeClassp = resolveScopeChain(refp->classOrPackageOpp());
+            if (!scopeClassp) return;
+            if (AstTypedef* const typedefp
+                = VN_CAST(m_memberMap.findMember(scopeClassp, refp->name()), Typedef)) {
+                refp->typedefp(typedefp);
+                refp->classOrPackagep(scopeClassp);
+            }
+            return;
+        }
 
         AstClass* srcClassp = VN_CAST(classRefp->classOrPackageNodep(), Class);
         if (srcClassp && srcClassp->hasGParam()) {
@@ -2226,7 +2273,12 @@ public:
         // Dots resolve before outer (vector stays empty for cells with no class Dots).
         std::vector<AstDot*> dotps;
         nodep->foreach([&](AstDot* dotp) {
-            if (VN_IS(dotp->lhsp(), ClassOrPackageRef)) dotps.push_back(dotp);
+            // A multi-segment scope nests Dots on the lhs, so accept those as well.
+            // resolveDotToTypedef ignores the inner scope-only Dots, whose rhs is a
+            // ClassOrPackageRef rather than a ParseRef.
+            if (VN_IS(dotp->lhsp(), ClassOrPackageRef) || VN_IS(dotp->lhsp(), Dot)) {
+                dotps.push_back(dotp);
+            }
         });
         for (auto it = dotps.rbegin(); it != dotps.rend(); ++it) resolveDotToTypedef(*it);
         // Evaluate all module constants
